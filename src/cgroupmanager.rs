@@ -4,18 +4,18 @@
 use std::{
     fmt::Display,
     fs, mem,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
 use anyhow::{anyhow, Error, Result};
 use cgroups_rs::{
     cgroup::{Cgroup, UNIFIED_MOUNTPOINT},
-    freezer::FreezerState,
+    freezer::{FreezerController, FreezerState},
     hierarchies::{self, is_cgroup2_unified_mode},
-    Subsystem::Freezer,
+    memory::MemController,
+    MaxValue,
+    Subsystem::{Freezer, Mem},
 };
 use notify::Event;
 use tokio::{
@@ -28,16 +28,13 @@ use futures_util::StreamExt;
 use inotify::{Inotify, WatchMask};
 
 use tracing::{info, warn};
-
 pub struct CgroupManager {
     /// Receives updates on memory high events
-    highs: Receiver<MemoryHigh>,
+    highs: Receiver<u64>,
     errors: Receiver<Error>,
     name: String,
     cgroup: Cgroup,
 }
-
-type MemoryHigh = u64;
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum MemoryEvent {
@@ -62,6 +59,11 @@ impl Display for MemoryEvent {
     }
 }
 
+pub struct MemoryLimits {
+    low: u64,
+    high: u64,
+}
+
 impl CgroupManager {
     /// Load the cgroup named `name`. This should just be the name of the cgroup,
     /// and not include anything like /sys/fs/cgroups
@@ -72,7 +74,6 @@ impl CgroupManager {
         }
 
         let cgroup = Cgroup::load(hierarchies::auto(), &name);
-
 
         // Set up a watcher that notifies on changes to memory.events
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
@@ -115,7 +116,8 @@ impl CgroupManager {
                 if let Some(val) = events.next().await {
                     match val {
                         Ok(_) => {
-                            if let Ok(high) = Self::get_event_count(&name_clone, MemoryEvent::High) {
+                            if let Ok(high) = Self::get_event_count(&name_clone, MemoryEvent::High)
+                            {
                                 if high_count.fetch_max(high, Ordering::SeqCst) < high {
                                     event_tx.send(high).await.unwrap()
                                 }
@@ -158,7 +160,8 @@ impl CgroupManager {
     /// Read memory.events for the desired event type.
     fn get_event_count(name: &str, event: MemoryEvent) -> Result<u64> {
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
-        let contents: String = fs::read_to_string(&path).expect("failed to read memory events info");
+        let contents: String =
+            fs::read_to_string(&path).expect("failed to read memory events info");
         contents
             .lines()
             .filter_map(|s| s.split_once(' '))
@@ -183,35 +186,72 @@ impl CgroupManager {
         }
     }
 
-    pub fn freeze(&self) -> Result<()> {
+    fn freezer(&self) -> Result<&FreezerController> {
         if let Some(Freezer(freezer)) = self
             .cgroup
             .subsystems()
             .iter()
             .find(|sub| matches!(sub, Freezer(_)))
         {
-            freezer.freeze().map_err(|e| e.into())
+            Ok(freezer)
         } else {
-            Err(anyhow!("failed to find freezer subsystem controller"))
+            Err(anyhow!("could not find freezer subsystem"))
         }
     }
 
+    pub fn freeze(&self) -> Result<()> {
+        self.freezer()?.freeze().map_err(|e| e.into())
+    }
+
     pub fn thaw(&self) -> Result<()> {
-        if let Some(Freezer(freezer)) = self
+        self.freezer()?.thaw().map_err(|e| e.into())
+    }
+
+    fn memory(&self) -> Result<&MemController> {
+        if let Some(Mem(memory)) = self
             .cgroup
             .subsystems()
             .iter()
-            .find(|sub| matches!(sub, Freezer(_)))
+            .find(|sub| matches!(sub, Mem(_)))
         {
-            freezer.thaw().map_err(|e| e.into())
+            Ok(memory)
         } else {
-            Err(anyhow!("failed to find freezer subsystem controller"))
+            Err(anyhow!("could not find memory subsystem"))
         }
     }
 
     pub fn current_memory_usage(&self) -> Result<u64> {
-        let path = format!("{}/{}/memory.current", UNIFIED_MOUNTPOINT, self.name);
-        let contents = fs::read_to_string(path)?;
-        contents.trim().parse::<u64>().map_err(|e| e.into())
+        Ok(self.memory()?.memory_stat().usage_in_bytes)
+    }
+
+    pub fn set_high_bytes(&self, bytes: u64) -> Result<()> {
+        self.memory()?
+            .set_mem(cgroups_rs::memory::SetMemory {
+                low: None,
+                high: Some(MaxValue::Value(bytes.max(i64::MAX as u64) as i64)),
+                min: None,
+                max: None,
+            })
+            .map_err(|e| e.into())
+    }
+
+    pub fn set_limits(&self, limits: MemoryLimits) -> Result<()> {
+        self.memory()?
+            .set_mem(cgroups_rs::memory::SetMemory {
+                low: Some(MaxValue::Value(limits.low.max(i64::MAX as u64) as i64)),
+                high: Some(MaxValue::Value(limits.high.max(i64::MAX as u64) as i64)),
+                min: None,
+                max: None,
+            })
+            .map_err(|e| e.into())
+    }
+
+    pub fn get_high_bytes(&self) -> Result<u64> {
+        let high = self.memory()?.get_mem().map(|mem| mem.high)?;
+        match high {
+            Some(MaxValue::Max) => Ok(i64::MAX as u64),
+            Some(MaxValue::Value(high)) => Ok(high as u64),
+            None => Err(anyhow!("failed to read memory.high from memory subsystem")),
+        }
     }
 }
