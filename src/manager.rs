@@ -28,12 +28,12 @@ use futures_util::StreamExt;
 use inotify::{Inotify, WatchMask};
 
 use tracing::{info, warn};
-pub struct CgroupManager {
+pub struct Manager {
     /// Receives updates on memory high events
-    highs: Receiver<u64>,
-    errors: Receiver<Error>,
-    name: String,
-    cgroup: Cgroup,
+    pub(crate) highs: Receiver<u64>,
+    pub(crate) errors: Receiver<Error>,
+    pub(crate) name: String,
+    pub(crate) cgroup: Cgroup,
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -60,11 +60,19 @@ impl Display for MemoryEvent {
 }
 
 pub struct MemoryLimits {
-    low: u64,
     high: u64,
+    max: u64,
 }
 
-impl CgroupManager {
+impl MemoryLimits {
+    pub fn new(high: u64, max: u64) -> Self {
+        return Self {
+            max, high
+        }
+    }
+}
+
+impl Manager {
     /// Load the cgroup named `name`. This should just be the name of the cgroup,
     /// and not include anything like /sys/fs/cgroups
     pub async fn new(name: String) -> Result<Self> {
@@ -238,7 +246,7 @@ impl CgroupManager {
     pub fn set_limits(&self, limits: MemoryLimits) -> Result<()> {
         self.memory()?
             .set_mem(cgroups_rs::memory::SetMemory {
-                low: Some(MaxValue::Value(limits.low.max(i64::MAX as u64) as i64)),
+                low: Some(MaxValue::Value(limits.max.max(i64::MAX as u64) as i64)),
                 high: Some(MaxValue::Value(limits.high.max(i64::MAX as u64) as i64)),
                 min: None,
                 max: None,
@@ -253,5 +261,9 @@ impl CgroupManager {
             Some(MaxValue::Value(high)) => Ok(high as u64),
             None => Err(anyhow!("failed to read memory.high from memory subsystem")),
         }
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
     }
 }

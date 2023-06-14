@@ -1,3 +1,4 @@
 pub mod cgroup;
-pub mod cgroupmanager;
+pub mod manager;
 pub mod filecache;
+pub mod timer;
