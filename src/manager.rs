@@ -35,6 +35,7 @@ pub struct Manager {
     pub(crate) highs: Receiver<u64>,
     pub(crate) errors: Receiver<Error>,
     pub(crate) name: String,
+    // TODO: might need to put a rwlock around this?
     pub(crate) cgroup: Cgroup,
 }
 
@@ -68,9 +69,7 @@ pub struct MemoryLimits {
 
 impl MemoryLimits {
     pub fn new(high: u64, max: u64) -> Self {
-        return Self {
-            max, high
-        }
+        return Self { max, high };
     }
 }
 
@@ -170,8 +169,7 @@ impl Manager {
     /// Read memory.events for the desired event type.
     fn get_event_count(name: &str, event: MemoryEvent) -> Result<u64> {
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
-        let contents: String =
-            fs::read_to_string(&path).expect("failed to read memory events info");
+        let contents = fs::read_to_string(&path).expect("failed to read memory events info");
         contents
             .lines()
             .filter_map(|s| s.split_once(' '))
@@ -184,16 +182,7 @@ impl Manager {
     }
 
     pub fn state(&self) -> Result<FreezerState> {
-        if let Some(Freezer(freezer)) = self
-            .cgroup
-            .subsystems()
-            .iter()
-            .find(|sub| matches!(sub, Freezer(_)))
-        {
-            freezer.state().map_err(|e| e.into())
-        } else {
-            Err(anyhow!("failed to find freezer subsystem controller"))
-        }
+        self.freezer()?.state().map_err(|e| e.into())
     }
 
     fn freezer(&self) -> Result<&FreezerController> {

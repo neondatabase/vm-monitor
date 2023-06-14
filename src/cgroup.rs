@@ -1,6 +1,14 @@
-use crate::manager::{Manager, MemoryLimits};
+// TODO: standardize using 'memory high event' or 'memory.high event'
+// TODO: logging; make sure to assess how control flow like ? affects it.
+
+use std::time::Instant;
+
+use crate::{
+    manager::{Manager, MemoryLimits},
+    timer::Timer,
+};
 use anyhow::Result;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
+use tokio::sync::mpsc::{Receiver, Sender};
 use tracing::info;
 
 #[allow(non_upper_case_globals)]
@@ -104,16 +112,162 @@ impl CgroupState {
 
         let limits = MemoryLimits::new(new_high, available_memory);
 
-        self.manager.set_limits(limits).map(|_| {
-            info!(
-                "Successfully set cgroup {} memory limits",
-                self.manager.name
-            )
-        })
+        self.manager.set_limits(limits)?;
+
+        info!(
+            "Successfully set cgroup {} memory limits",
+            self.manager.name
+        );
+        Ok(())
     }
 
-    pub async fn handle_cgroup_signals_loop(&self, config: CgroupConfig) {
+    pub async fn handle_cgroup_signals_loop(&mut self) {
+        // FIXME: we should have "proper" error handling instead of just panicking. It's hard to
+        // determine what the correct behavior should be if a cgroup operation fails, though.
+
         let mut waiting_on_upscale = false;
+        let mut wait_to_increase_memory_high = Timer::new(0);
+        let mut wait_to_freeze = Timer::new(0);
+        loop {
+            // Wait for a new signal
+            tokio::select! {
+                // Just panic on errors for now, see FIXME
+                err = self.manager.errors.recv() => {
+                    match err {
+                        Some(err) => panic!("Error listening for cgroup signals {err}"),
+                        None => panic!("Error channel was unexpectedly closed")
+                    }
+                }
+
+                _ = self.upscale_events_receiver.recv() => {
+                    info!("Received upscale event");
+                    let _ = self.manager.highs.recv().await;
+                }
+
+                _ = self.manager.highs.recv() => {
+                    tokio::select! {
+                        _ = &mut wait_to_freeze => {
+                            match self.handle_memory_high_event().await {
+                                 Ok(b) => {
+                                    waiting_on_upscale = b;
+                                    wait_to_freeze = Timer::new(self.config.do_not_freeze_more_often_than_millis);
+                                 },
+                                 Err(e) => panic!("Error handling memory high event {e}")
+                            }
+                        }
+                        else => {
+                            if !waiting_on_upscale {
+                                info!("Received memory.high event, but too soon to re-freeze. Requesting upscale.");
+
+                                tokio::select! {
+                                    _ = self.upscale_events_receiver.recv() => {
+                                        info!("No need to request upscaling because we were already upscaled");
+                                        return;
+                                    }
+                                    else => {
+                                        // TODO: could just unwrap
+                                        match self.request_upscale().await {
+                                            Ok(_) => {},
+                                            Err(e) => panic!("Error requesting upscale {e}")
+                                        }
+                                    }
+                                }
+                            } else {
+                                tokio::select! {
+                                    _ = &mut wait_to_increase_memory_high => {
+                                        tokio::select! {
+                                            _ = self.upscale_events_receiver.recv() => {
+                                                info!("No need to request upscaling because we were already upscaled");
+                                                return;
+                                            }
+                                            else => {
+                                                // TODO: could just unwrap
+                                                match self.request_upscale().await {
+                                                    Ok(_) => {},
+                                                    Err(e) => panic!("Error requesting upscale {e}")
+                                                }
+                                            }
+                                        };
+
+                                        let mem_high = match self.manager.get_high_bytes() {
+                                            Ok(high) => high,
+                                            Err(e) => panic!("Error fetching memory.high {}", e)
+                                        };
+
+                                        let new_high = mem_high + self.config.memory_high_increase_by_bytes;
+                                        info!("Updating memory.high from {} -> {} Mib",
+                                              (mem_high as f32) / (MiB as f32),
+                                              (new_high as f32) / (MiB as f32)
+                                        );
+
+                                        if let Err(e) = self.manager.set_high_bytes(new_high) {
+                                            panic!("Error setting memory limits: {e}")
+                                        }
+
+                                        wait_to_increase_memory_high = Timer::new(self.config.memory_high_increase_every_millis)
+                                    }
+                                    else => {
+                                        // Can't do anything
+                                    }
+                                }
+                                info!("Received memory.high event, too soon to re-freeze, but increasing memory.high");
+
+                            }
+                        }
+                    }
+                }
+
+            }
+        }
+    }
+
+    pub async fn handle_memory_high_event(&mut self) -> Result<bool> {
+        tokio::select! {
+            _ = self.upscale_events_receiver.recv() => {
+                info!("Skipping memory.high event because there was an upscale vent");
+                return Ok(false);
+            }
+            else => {}
+        };
+
+        info!("Received memory high event. Freezing cgroup.");
+
+        self.manager.freeze()?;
+
+        let start = Instant::now();
+
+        let must_thaw = Timer::new(self.config.max_upscale_wait_millis);
+
+        info!(
+            "Sending request for immediate upscaling, waiting for at most {}",
+            self.config.max_upscale_wait_millis
+        );
+
+        self.request_upscale().await?;
+
+        let mut upscaled = false;
+        let total_wait;
+
+        tokio::select! {
+            _ = self.upscale_events_receiver.recv() => {
+                total_wait = start.elapsed();
+                info!("Received notification that upscale occured after {total_wait:?}. Thawing cgroup.");
+                upscaled = false;
+            }
+            _ = must_thaw => {
+                total_wait = start.elapsed();
+                info!("Time out after {total_wait:?} waiting for upscale. Thawing cgroup.")
+            }
+        };
+
+        self.manager.thaw()?;
+
+        self.manager.highs.recv().await;
+
+        return Ok(!upscaled);
+    }
+
+    pub async fn request_upscale(&self) -> Result<()> {
         todo!()
     }
 }
