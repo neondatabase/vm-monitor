@@ -28,6 +28,8 @@ use futures_util::StreamExt;
 use inotify::{Inotify, WatchMask};
 
 use tracing::{info, warn};
+
+use crate::timer::{self, Timer};
 pub struct Manager {
     /// Receives updates on memory high events
     pub(crate) highs: Receiver<u64>,
@@ -92,8 +94,8 @@ impl Manager {
         let (event_tx, mut event_rx) = channel(1);
         let (error_tx, error_rx) = channel(1);
 
-        let min_wait = Duration::from_secs(1);
-        let mut waiter = tokio::spawn(time::sleep(min_wait));
+        let min_wait = 1000; // 1000ms = 1s
+        let mut waiter = Timer::new(min_wait);
         let high_count = AtomicU64::new(0);
         let name_clone = name.clone();
 
@@ -117,7 +119,7 @@ impl Manager {
                     }
                 };
 
-                waiter = tokio::spawn(time::sleep(min_wait));
+                waiter = Timer::new(min_wait);
 
                 // Read memory.events and send an update down the channel if the number of high events
                 // has increased

@@ -1,17 +1,30 @@
+use std::pin::Pin;
+use std::{future::Future, task::Poll};
 use std::time::Duration;
 
 use tokio::{task::JoinHandle, time::sleep};
 
+/// A non-blocking timer that starts running in the background. Implements
+/// `Future` so you can `.await` to manually wait for the time to run out.
 pub struct Timer(JoinHandle<()>);
 
 impl Timer {
     pub fn new(millis: u64) -> Self {
-        Timer(tokio::spawn(async {
+        Timer(tokio::spawn(async move {
             sleep(Duration::from_millis(millis)).await
         }))
     }
+}
 
-    pub async fn stall(self) {
-        self.0.await.unwrap()
+impl Future for Timer {
+    type Output = ();
+
+    fn poll( mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        match Pin::new(&mut self.0).poll(cx) {
+            std::task::Poll::Ready(res) => Poll::Ready(res.unwrap()),
+            std::task::Poll::Pending => Poll::Pending
+        }
     }
 }
