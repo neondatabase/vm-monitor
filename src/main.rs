@@ -1,3 +1,7 @@
+use clap::Parser;
+use compute_ctl::Args;
+
 fn main() {
-    println!("Hello, world!");
+    let args = Args::parse();
+    println!("{args:?}")
 }

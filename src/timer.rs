@@ -1,6 +1,6 @@
 use std::pin::Pin;
-use std::{future::Future, task::Poll};
 use std::time::Duration;
+use std::{future::Future, task::Poll};
 
 use tokio::{task::JoinHandle, time::sleep};
 
@@ -19,12 +19,13 @@ impl Timer {
 impl Future for Timer {
     type Output = ();
 
-    fn poll( mut self: std::pin::Pin<&mut Self>,
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Self::Output> {
         match Pin::new(&mut self.0).poll(cx) {
             std::task::Poll::Ready(res) => Poll::Ready(res.unwrap()),
-            std::task::Poll::Pending => Poll::Pending
+            std::task::Poll::Pending => Poll::Pending,
         }
     }
 }

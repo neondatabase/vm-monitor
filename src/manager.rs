@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, Error, Result};
+use anyhow::{anyhow, bail, Error, Result};
 use cgroups_rs::{
     cgroup::{Cgroup, UNIFIED_MOUNTPOINT},
     freezer::{FreezerController, FreezerState},
@@ -18,10 +18,9 @@ use cgroups_rs::{
     Subsystem::{Freezer, Mem},
 };
 use notify::Event;
-use tokio::{
-    sync::mpsc::{channel, Receiver},
-    time,
-};
+use tokio::time;
+
+use async_std::channel::{self, Receiver};
 
 use futures_util::StreamExt;
 
@@ -29,7 +28,7 @@ use inotify::{Inotify, WatchMask};
 
 use tracing::{info, warn};
 
-use crate::timer::{self, Timer};
+use crate::timer::Timer;
 pub struct Manager {
     /// Receives updates on memory high events
     pub(crate) highs: Receiver<u64>,
@@ -79,7 +78,7 @@ impl Manager {
     pub async fn new(name: String) -> Result<Self> {
         // TODO: check for cgroup mode
         if !is_cgroup2_unified_mode() {
-            return Err(anyhow!("cgroups v2 not supported"));
+            bail!("cgroups v2 not supported");
         }
 
         let cgroup = Cgroup::load(hierarchies::auto(), &name);
@@ -89,9 +88,9 @@ impl Manager {
         let inotify = Inotify::init()?;
         inotify.watches().add(&path, WatchMask::MODIFY)?;
 
-        // TODO: do we want this to be unbounded?
-        let (event_tx, mut event_rx) = channel(1);
-        let (error_tx, error_rx) = channel(1);
+        // These are effectively just signals
+        let (event_tx, event_rx) = channel::bounded(1);
+        let (error_tx, error_rx) = channel::bounded(1);
 
         let min_wait = 1000; // 1000ms = 1s
         let mut waiter = Timer::new(min_wait);
@@ -194,16 +193,16 @@ impl Manager {
         {
             Ok(freezer)
         } else {
-            Err(anyhow!("could not find freezer subsystem"))
+            bail!("could not find freezer subsystem")
         }
     }
 
     pub fn freeze(&self) -> Result<()> {
-        self.freezer()?.freeze().map_err(|e| e.into())
+        Ok(self.freezer()?.freeze()?)
     }
 
     pub fn thaw(&self) -> Result<()> {
-        self.freezer()?.thaw().map_err(|e| e.into())
+        Ok(self.freezer()?.thaw()?)
     }
 
     fn memory(&self) -> Result<&MemController> {
@@ -215,7 +214,7 @@ impl Manager {
         {
             Ok(memory)
         } else {
-            Err(anyhow!("could not find memory subsystem"))
+            bail!("could not find memory subsystem")
         }
     }
 
@@ -224,25 +223,21 @@ impl Manager {
     }
 
     pub fn set_high_bytes(&self, bytes: u64) -> Result<()> {
-        self.memory()?
-            .set_mem(cgroups_rs::memory::SetMemory {
-                low: None,
-                high: Some(MaxValue::Value(bytes.max(i64::MAX as u64) as i64)),
-                min: None,
-                max: None,
-            })
-            .map_err(|e| e.into())
+        Ok(self.memory()?.set_mem(cgroups_rs::memory::SetMemory {
+            low: None,
+            high: Some(MaxValue::Value(bytes.max(i64::MAX as u64) as i64)),
+            min: None,
+            max: None,
+        })?)
     }
 
     pub fn set_limits(&self, limits: MemoryLimits) -> Result<()> {
-        self.memory()?
-            .set_mem(cgroups_rs::memory::SetMemory {
-                low: Some(MaxValue::Value(limits.max.max(i64::MAX as u64) as i64)),
-                high: Some(MaxValue::Value(limits.high.max(i64::MAX as u64) as i64)),
-                min: None,
-                max: None,
-            })
-            .map_err(|e| e.into())
+        Ok(self.memory()?.set_mem(cgroups_rs::memory::SetMemory {
+            low: Some(MaxValue::Value(limits.max.max(i64::MAX as u64) as i64)),
+            high: Some(MaxValue::Value(limits.high.max(i64::MAX as u64) as i64)),
+            min: None,
+            max: None,
+        })?)
     }
 
     pub fn get_high_bytes(&self) -> Result<u64> {
@@ -250,7 +245,7 @@ impl Manager {
         match high {
             Some(MaxValue::Max) => Ok(i64::MAX as u64),
             Some(MaxValue::Value(high)) => Ok(high as u64),
-            None => Err(anyhow!("failed to read memory.high from memory subsystem")),
+            None => bail!("failed to read memory.high from memory subsystem"),
         }
     }
 

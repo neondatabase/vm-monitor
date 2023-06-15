@@ -1,19 +1,21 @@
+// TODO: should all fields be pub(crate)?
+
 use postgres::Client;
 use tokio_postgres::NoTls;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{bail, Context, Result};
 use tracing::info;
 
-struct FileCacheState {
+pub struct FileCacheState {
     conn: Client,
-    config: FileCacheConfig,
+    pub(crate) config: FileCacheConfig,
 }
 
-struct FileCacheConfig {
+pub struct FileCacheConfig {
     /// InMemory indicates whether the file cache is *actually* stored in memory (e.g. by writing to
     /// a tmpfs or shmem file). If true, the size of the file cache will be counted against the
     /// memory available for the cgroup.
-    in_memory: bool,
+    pub(crate) in_memory: bool,
 
     // ResourceMultiplier gives the size of the file cache, in terms of the size of the resource it
     // consumes (currently: only memory)
@@ -60,21 +62,18 @@ impl Default for FileCacheConfig {
 }
 
 impl FileCacheConfig {
-    fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<()> {
         // Single field validity
         if !(0.0 < self.resource_multiplier && self.resource_multiplier < 1.0) {
-            return Err(anyhow!(
+            bail!(
                 "resource_multiplier must be between 0.0 and 1.0 exclusive, got {}",
                 self.resource_multiplier
-            ));
+            )
         } else if self.spread_factor < 0.0 {
             // TODO: does floating point stuff require we check !(self.spread_factor >= 0.0)?
-            return Err(anyhow!(
-                "spread_factor must be >= 0, gor {}",
-                self.spread_factor
-            ));
+            bail!("spread_factor must be >= 0, got {}", self.spread_factor)
         } else if self.min_remaining_after_cache == 0 {
-            return Err(anyhow!("min_remaining_after_cache must not be 0"));
+            bail!("min_remaining_after_cache must not be 0");
         }
 
         // Check that ResourceMultiplier and SpreadFactor are valid w.r.t. each other.
@@ -107,13 +106,13 @@ impl FileCacheConfig {
         if intersect_factor >= 1.0 {
             // TODO: once again, does floating point evilness require we check if
             // !(intersect_factor < 1.0)
-            return Err(anyhow!("incompatible ResourceMultiplier and SpreadFactor"));
+            bail!("incompatible ResourceMultiplier and SpreadFactor");
         }
         Ok(())
     }
 
     /// Calculate the desired size of the cache, given the total memory
-    fn calculate_cache_size(&self, total: u64) -> u64 {
+    pub fn calculate_cache_size(&self, total: u64) -> u64 {
         let available = total.saturating_sub(self.min_remaining_after_cache);
         if available == 0 {
             return 0;
@@ -136,14 +135,13 @@ impl FileCacheConfig {
 }
 
 impl FileCacheState {
-    fn new(conn_str: &str, config: FileCacheConfig) -> Result<Self> {
-        Ok(Self {
-            conn: Client::connect(conn_str, NoTls)?,
-            config,
-        })
+    pub fn new(conn_str: &str, config: FileCacheConfig) -> Result<Self> {
+        let conn = Client::connect(conn_str, NoTls)?;
+        config.validate()?;
+        Ok(Self { conn, config })
     }
 
-    fn get_file_cache_size(&mut self) -> Result<u64> {
+    pub fn get_file_cache_size(&mut self) -> Result<u64> {
         Ok(self
             .conn
             .query_one(
@@ -156,7 +154,7 @@ impl FileCacheState {
             .map(|bytes| bytes as u64)?)
     }
 
-    fn set_file_cache_size(&mut self, mut num_bytes: u64) -> Result<u64> {
+    pub fn set_file_cache_size(&mut self, num_bytes: u64) -> Result<u64> {
         let max_bytes = self
             .conn
             .query_one(
