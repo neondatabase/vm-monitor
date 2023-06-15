@@ -5,7 +5,7 @@
 use std::{
     fmt::Display,
     fs, future, mem,
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{atomic::{AtomicU64, Ordering}, Mutex},
     time::Duration,
 };
 
@@ -37,6 +37,9 @@ pub struct Manager {
     pub(crate) name: String,
     // TODO: might need to put a rwlock around this?
     pub(crate) cgroup: Cgroup,
+    // This lock must be held while while performing IO on cgroup "files"
+    // like memory.high, memory.current, etc
+    memory_update_lock: Mutex<()>
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -238,6 +241,7 @@ impl Manager {
     }
 
     pub fn set_high_bytes(&self, bytes: u64) -> Result<()> {
+        self.memory_update_lock.lock().unwrap();
         Ok(self
             .memory()
             .context("Failed to get memory subsystem while setting memory.high")?
@@ -251,6 +255,7 @@ impl Manager {
     }
 
     pub fn set_limits(&self, limits: MemoryLimits) -> Result<()> {
+        self.memory_update_lock.lock().unwrap();
         Ok(self
             .memory()
             .context("Failed to get memory subsystem while setting memory limits")?
@@ -264,6 +269,7 @@ impl Manager {
     }
 
     pub fn get_high_bytes(&self) -> Result<u64> {
+        self.memory_update_lock.lock().unwrap();
         let high = self
             .memory()
             .context("Failed to get memory subsystem while getting memory statistics")?
