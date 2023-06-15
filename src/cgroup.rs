@@ -1,7 +1,7 @@
 // TODO: standardize using 'memory high event' or 'memory.high event'
 // TODO: logging; make sure to assess how control flow like ? affects it.
 
-use std::{sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant, future};
 
 use crate::{
     manager::{Manager, MemoryLimits},
@@ -158,6 +158,7 @@ impl CgroupState {
 
                     _ = state.manager.highs.recv() => {
                         tokio::select! {
+                            biased;
                             _ = &mut wait_to_freeze => {
                                 match state.handle_memory_high_event().await {
                                      Ok(b) => {
@@ -167,16 +168,17 @@ impl CgroupState {
                                      Err(e) => panic!("Error handling memory high event {e}")
                                 }
                             }
-                            else => {
+                            _ = future::ready(()) => {
                                 if !waiting_on_upscale {
                                     info!("Received memory.high event, but too soon to re-freeze. Requesting upscale.");
 
                                     tokio::select! {
+                                        biased;
                                         _ = state.upscale_events_receiver.recv() => {
                                             info!("No need to request upscaling because we were already upscaled");
                                             return;
                                         }
-                                        else => {
+                                        _ = future::ready(()) => {
                                             // TODO: could just unwrap
                                             match state.request_upscale().await {
                                                 Ok(_) => {},
@@ -186,13 +188,15 @@ impl CgroupState {
                                     }
                                 } else {
                                     tokio::select! {
+                                        biased;
                                         _ = &mut wait_to_increase_memory_high => {
                                             tokio::select! {
+                                                biased;
                                                 _ = state.upscale_events_receiver.recv() => {
                                                     info!("No need to request upscaling because we were already upscaled");
                                                     return;
                                                 }
-                                                else => {
+                                                _ = future::ready(()) => {
                                                     // TODO: could just unwrap
                                                     match state.request_upscale().await {
                                                         Ok(_) => {},
@@ -218,7 +222,7 @@ impl CgroupState {
 
                                             wait_to_increase_memory_high = Timer::new(state.config.memory_high_increase_every_millis)
                                         }
-                                        else => {
+                                        _ = future::ready(()) => {
                                             // Can't do anything
                                         }
                                     }
@@ -236,11 +240,14 @@ impl CgroupState {
 
     pub async fn handle_memory_high_event(&self) -> Result<bool> {
         tokio::select! {
+            biased;
+
             _ = self.upscale_events_receiver.recv() => {
                 info!("Skipping memory.high event because there was an upscale vent");
                 return Ok(false);
-            }
-            else => {}
+            },
+
+            _ = future::ready(()) => {}
         };
 
         info!("Received memory high event. Freezing cgroup.");

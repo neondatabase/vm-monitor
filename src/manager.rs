@@ -3,7 +3,7 @@
 
 use std::{
     fmt::Display,
-    fs, mem,
+    fs, future, mem,
     sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
@@ -109,8 +109,9 @@ impl Manager {
                 // The first branch will always be taken immediately on the first
                 // iteration because of how waiter is initialized.
                 tokio::select! {
+                    biased;
                     _ = waiter => (),
-                    else => {
+                    _ = future::ready(()) => {
                         info!("Respecting minimum wait of {min_wait:?} before restarting memory.events listener");
                         tokio::spawn(time::sleep(Duration::from_secs(0))).await.unwrap();
                         info!("Restarting memory.events listener")
