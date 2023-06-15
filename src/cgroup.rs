@@ -10,12 +10,10 @@ use crate::{
     MiB,
 };
 use anyhow::Result;
-// use tokio::sync::mpsc::{channel, Receiver, Sender};
 use async_std::channel::{self, Receiver, Sender};
 use tracing::info;
 
 pub struct CgroupState {
-    // TODO: quite possibel we should just own manager
     manager: Manager,
     config: CgroupConfig,
     upscale_events_sender: Sender<()>,
@@ -135,9 +133,9 @@ impl CgroupState {
         // FIXME: we should have "proper" error handling instead of just panicking. It's hard to
         // determine what the correct behavior should be if a cgroup operation fails, though.
         let state = Arc::clone(self);
-        let errors = state.manager.errors.clone();
-        let highs = state.manager.highs.clone();
-        let upscale_events_receiver = state.upscale_events_receiver.clone();
+        // let errors = state.manager.errors.clone();
+        // let highs = state.manager.highs.clone();
+        // let upscale_events_receiver = state.upscale_events_receiver.clone();
         tokio::spawn(async move {
             let mut waiting_on_upscale = false;
             let mut wait_to_increase_memory_high = Timer::new(0);
@@ -146,19 +144,19 @@ impl CgroupState {
                 // Wait for a new signal
                 tokio::select! {
                     // Just panic on errors for now, see FIXME
-                    err = errors.recv() => {
+                    err = state.manager.errors.recv() => {
                         match err {
                             Ok(err) => panic!("Error listening for cgroup signals {err}"),
                             Err(e) => panic!("Error channel was unexpectedly closed: {e}")
                         }
                     }
 
-                    _ = upscale_events_receiver.recv() => {
+                    _ = state.upscale_events_receiver.recv() => {
                         info!("Received upscale event");
-                        let _ = highs.recv().await;
+                        let _ = state.manager.highs.recv().await;
                     }
 
-                    _ = highs.recv() => {
+                    _ = state.manager.highs.recv() => {
                         tokio::select! {
                             _ = &mut wait_to_freeze => {
                                 match state.handle_memory_high_event().await {
@@ -174,7 +172,7 @@ impl CgroupState {
                                     info!("Received memory.high event, but too soon to re-freeze. Requesting upscale.");
 
                                     tokio::select! {
-                                        _ = upscale_events_receiver.recv() => {
+                                        _ = state.upscale_events_receiver.recv() => {
                                             info!("No need to request upscaling because we were already upscaled");
                                             return;
                                         }
@@ -190,7 +188,7 @@ impl CgroupState {
                                     tokio::select! {
                                         _ = &mut wait_to_increase_memory_high => {
                                             tokio::select! {
-                                                _ = upscale_events_receiver.recv() => {
+                                                _ = state.upscale_events_receiver.recv() => {
                                                     info!("No need to request upscaling because we were already upscaled");
                                                     return;
                                                 }
