@@ -77,7 +77,8 @@ impl Monitor {
                 panic!("file cache not in-memory implemented")
             }
 
-            let mut file_cache = FileCacheState::new(&connstr, config)?;
+            let mut file_cache =
+                FileCacheState::new(&connstr, config).context("Failed to create file cache")?;
             let size = file_cache
                 .get_file_cache_size()
                 .context("Error getting file cache size")?;
@@ -91,14 +92,18 @@ impl Monitor {
 
             // note: even if size == new_size, we want to explicitly set it, just
             // to make sure that we have the permissions to do so
-            let actual_size = file_cache.set_file_cache_size(new_size)?;
+            let actual_size = file_cache
+                .set_file_cache_size(new_size)
+                .context("Failed to set file cache size")?;
             state.file_cache_reserved_bytes = actual_size;
 
             state.filecache = Some(file_cache);
         }
 
         if let Some(name) = args.cgroup {
-            let manager = Manager::new(name).await?;
+            let manager = Manager::new(name)
+                .await
+                .context("Failed to create new manager")?;
             let config = Default::default();
             let mut cgroup_state = CgroupState::new(manager, config);
             let available = mem - state.file_cache_reserved_bytes;

@@ -136,8 +136,8 @@ impl FileCacheConfig {
 
 impl FileCacheState {
     pub fn new(conn_str: &str, config: FileCacheConfig) -> Result<Self> {
-        let conn = Client::connect(conn_str, NoTls)?;
-        config.validate()?;
+        let conn = Client::connect(conn_str, NoTls).context("Failed to connect to pg client")?;
+        config.validate().context("File cache config is invalid")?;
         Ok(Self { conn, config })
     }
 
@@ -147,11 +147,13 @@ impl FileCacheState {
             .query_one(
                 "SELECT pg_size_bytes(current_setting('neon.file_cache_size_limit'));",
                 &[],
-            )?
+            )
+            .context("Failed to query pg for file cache size")?
             // pg_size_bytes returns a bigint which is the same as an i64.
             .try_get::<_, i64>(0)
             // Since the size of the table is not negative, the cast is sound.
-            .map(|bytes| bytes as u64)?)
+            .map(|bytes| bytes as u64)
+            .context("Failed to extract file cache size from query result")?)
     }
 
     pub fn set_file_cache_size(&mut self, num_bytes: u64) -> Result<u64> {
@@ -160,10 +162,11 @@ impl FileCacheState {
             .query_one(
                 "SELECT pg_size_bytes(current_setting('neon.max_file_cache_size'));",
                 &[],
-            )?
+            )
+            .context("Failed to query pg for max file cache size")?
             .try_get::<_, i64>(0)
             .map(|bytes| bytes as u64)
-            .context("Failed to query max file cache size")?;
+            .context("Failed to extract amx file cache size form query result")?;
 
         let mut num_mb = num_bytes / (1 << 20);
         let max_mb = max_bytes / (1 << 20);

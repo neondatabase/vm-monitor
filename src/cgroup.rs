@@ -1,7 +1,7 @@
 // TODO: standardize using 'memory high event' or 'memory.high event'
 // TODO: logging; make sure to assess how control flow like ? affects it.
 
-use std::{sync::Arc, time::Instant, future};
+use std::{future, sync::Arc, time::Instant};
 
 use crate::{
     manager::{Manager, MemoryLimits},
@@ -9,7 +9,7 @@ use crate::{
     timer::Timer,
     MiB,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_std::channel::{self, Receiver, Sender};
 use tracing::info;
 
@@ -116,11 +116,13 @@ impl CgroupState {
             mib(new_high)
         );
 
-        self.manager.highs.recv().await?;
+        self.manager.highs.recv().await.unwrap();
 
         let limits = MemoryLimits::new(new_high, available_memory);
 
-        self.manager.set_limits(limits)?;
+        self.manager
+            .set_limits(limits)
+            .context("Failed to set cgroup memory limits")?;
 
         info!(
             "Successfully set cgroup {} memory limits",
@@ -252,7 +254,9 @@ impl CgroupState {
 
         info!("Received memory high event. Freezing cgroup.");
 
-        self.manager.freeze()?;
+        self.manager
+            .freeze()
+            .with_context(|| format!("Failed to freeze cgroup {}", self.manager.name))?;
 
         let start = Instant::now();
 
@@ -263,7 +267,9 @@ impl CgroupState {
             self.config.max_upscale_wait_millis
         );
 
-        self.request_upscale().await?;
+        self.request_upscale()
+            .await
+            .context("Failed to request upscale")?;
 
         let mut upscaled = false;
         let total_wait;
@@ -280,9 +286,11 @@ impl CgroupState {
             }
         };
 
-        self.manager.thaw()?;
+        self.manager
+            .thaw()
+            .with_context(|| format!("Failed to thaw cgroup {}", self.manager.name))?;
 
-        self.manager.highs.recv().await?;
+        self.manager.highs.recv().await.unwrap();
 
         return Ok(!upscaled);
     }

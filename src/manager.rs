@@ -1,5 +1,6 @@
 // Need to think about who is releasing the cgroup
 // Instead of channels, could use condvars and callback?
+// TODO: is it ok to just unwrap channel errors? How could we handle them?
 
 use std::{
     fmt::Display,
@@ -8,7 +9,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, bail, Error, Result};
+use anyhow::{anyhow, bail, Context, Error, Result};
 use cgroups_rs::{
     cgroup::{Cgroup, UNIFIED_MOUNTPOINT},
     freezer::{FreezerController, FreezerState},
@@ -85,8 +86,11 @@ impl Manager {
 
         // Set up a watcher that notifies on changes to memory.events
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
-        let inotify = Inotify::init()?;
-        inotify.watches().add(&path, WatchMask::MODIFY)?;
+        let inotify = Inotify::init().context("Failed to initialize file watcher")?;
+        inotify
+            .watches()
+            .add(&path, WatchMask::MODIFY)
+            .with_context(|| format!("Failed to start watching {path}"))?;
 
         // These are effectively just signals
         let (event_tx, event_rx) = channel::bounded(1);
@@ -156,7 +160,7 @@ impl Manager {
 
         // Ignore the first set of events. We don't actually want to be notified
         // on startup since some processes might already be running.
-        let _ = event_rx.recv().await;
+        event_rx.recv().await.unwrap();
 
         Ok(Self {
             highs: event_rx,
@@ -170,7 +174,7 @@ impl Manager {
     fn get_event_count(name: &str, event: MemoryEvent) -> Result<u64> {
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
         let contents = fs::read_to_string(&path).expect("failed to read memory events info");
-        contents
+        Ok(contents
             .lines()
             .filter_map(|s| s.split_once(' '))
             .find(|(e, _)| *e == event.to_string())
@@ -178,11 +182,15 @@ impl Manager {
             .ok_or(anyhow!(
                 "failed to find entry for memory high events in {path}"
             ))?
-            .map_err(|e| e.into())
+            .context("Failed to parse memory.high as u64")?)
     }
 
     pub fn state(&self) -> Result<FreezerState> {
-        self.freezer()?.state().map_err(|e| e.into())
+        Ok(self
+            .freezer()
+            .context("Failed to get freezer subsystem while attempting to get freezer state")?
+            .state()
+            .context("Failed to get freezer state")?)
     }
 
     fn freezer(&self) -> Result<&FreezerController> {
@@ -199,11 +207,17 @@ impl Manager {
     }
 
     pub fn freeze(&self) -> Result<()> {
-        Ok(self.freezer()?.freeze()?)
+        Ok(self
+            .freezer()
+            .context("Failed to get freezer subsystem while attempting to freeze")?
+            .freeze()?)
     }
 
     pub fn thaw(&self) -> Result<()> {
-        Ok(self.freezer()?.thaw()?)
+        Ok(self
+            .freezer()
+            .context("Failed to get freezer subsystem while attempting to thaw")?
+            .thaw()?)
     }
 
     fn memory(&self) -> Result<&MemController> {
@@ -224,33 +238,42 @@ impl Manager {
     }
 
     pub fn set_high_bytes(&self, bytes: u64) -> Result<()> {
-        Ok(self.memory()?.set_mem(cgroups_rs::memory::SetMemory {
-            low: None,
-            high: Some(MaxValue::Value(bytes.max(i64::MAX as u64) as i64)),
-            min: None,
-            max: None,
-        })?)
+        Ok(self
+            .memory()
+            .context("Failed to get memory subsystem while setting memory.high")?
+            .set_mem(cgroups_rs::memory::SetMemory {
+                low: None,
+                high: Some(MaxValue::Value(bytes.max(i64::MAX as u64) as i64)),
+                min: None,
+                max: None,
+            })
+            .context("Failed to set memory.high")?)
     }
 
     pub fn set_limits(&self, limits: MemoryLimits) -> Result<()> {
-        Ok(self.memory()?.set_mem(cgroups_rs::memory::SetMemory {
-            low: Some(MaxValue::Value(limits.max.max(i64::MAX as u64) as i64)),
-            high: Some(MaxValue::Value(limits.high.max(i64::MAX as u64) as i64)),
-            min: None,
-            max: None,
-        })?)
+        Ok(self
+            .memory()
+            .context("Failed to get memory subsystem while setting memory limits")?
+            .set_mem(cgroups_rs::memory::SetMemory {
+                low: Some(MaxValue::Value(limits.max.max(i64::MAX as u64) as i64)),
+                high: Some(MaxValue::Value(limits.high.max(i64::MAX as u64) as i64)),
+                min: None,
+                max: None,
+            })
+            .context("Failed to set memory limits")?)
     }
 
     pub fn get_high_bytes(&self) -> Result<u64> {
-        let high = self.memory()?.get_mem().map(|mem| mem.high)?;
+        let high = self
+            .memory()
+            .context("Failed to get memory subsystem while getting memory statistics")?
+            .get_mem()
+            .map(|mem| mem.high)
+            .context("Failed to get memory statistics from subsystem")?;
         match high {
             Some(MaxValue::Max) => Ok(i64::MAX as u64),
             Some(MaxValue::Value(high)) => Ok(high as u64),
             None => bail!("failed to read memory.high from memory subsystem"),
         }
-    }
-
-    pub fn name(&self) -> &str {
-        &self.name
     }
 }
