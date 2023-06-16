@@ -22,6 +22,8 @@ pub fn get_total_system_memory() -> u64 {
     System::new_with_specifics(RefreshKind::new().with_memory()).total_memory()
 }
 
+/// Code that interfaces with agent
+pub mod bridge;
 pub mod cgroup;
 pub mod filecache;
 pub mod manager;

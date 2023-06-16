@@ -1,9 +1,8 @@
 // TODO: should all fields be pub(crate)?
 
+use anyhow::{bail, Context, Result};
 use postgres::Client;
 use tokio_postgres::NoTls;
-
-use anyhow::{bail, Context, Result};
 use tracing::info;
 
 pub struct FileCacheState {

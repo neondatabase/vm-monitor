@@ -1,15 +1,19 @@
-// Need to think about who is releasing the cgroup
+// Need to think about who is releasing/initing the cgroup
 // Instead of channels, could use condvars and callback?
 // TODO: is it ok to just unwrap channel errors? How could we handle them?
 
 use std::{
     fmt::Display,
     fs, future, mem,
-    sync::{atomic::{AtomicU64, Ordering}, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     time::Duration,
 };
 
 use anyhow::{anyhow, bail, Context, Error, Result};
+use async_std::channel::{self, Receiver};
 use cgroups_rs::{
     cgroup::{Cgroup, UNIFIED_MOUNTPOINT},
     freezer::{FreezerController, FreezerState},
@@ -18,28 +22,40 @@ use cgroups_rs::{
     MaxValue,
     Subsystem::{Freezer, Mem},
 };
+use futures_util::StreamExt;
+use inotify::{Inotify, WatchMask};
 use notify::Event;
 use tokio::time;
-
-use async_std::channel::{self, Receiver};
-
-use futures_util::StreamExt;
-
-use inotify::{Inotify, WatchMask};
-
 use tracing::{info, warn};
 
 use crate::timer::Timer;
+
 pub struct Manager {
     /// Receives updates on memory high events
+    ///
+    /// Note: this channel's methods should be cancellation safe, refer to the
+    /// async-std source code.
     pub(crate) highs: Receiver<u64>,
+
+    /// Receives errors retrieving cgroup statistics
+    ///
+    /// Note: this channel's methods should be cancellation safe, refer to the
+    /// async-std source code.
     pub(crate) errors: Receiver<Error>,
+
     pub(crate) name: String,
-    // TODO: might need to put a rwlock around this?
     pub(crate) cgroup: Cgroup,
-    // This lock must be held while while performing IO on cgroup "files"
-    // like memory.high, memory.current, etc
-    memory_update_lock: Mutex<()>
+
+    /// # Safety
+    /// This lock must be held while while performing IO on cgroup "files"
+    /// like memory.high, memory.current, etc
+    ///
+    /// A normal Mutex is appropriate since we never lock the mutex in async
+    /// functions (although an async function may call a sync function that acceses
+    /// the mutex), so it is guaranteed to never be held across await points.
+    ///
+    /// Design note: perhaps we could make a new struct combining
+    memory_update_lock: Mutex<()>,
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -170,6 +186,7 @@ impl Manager {
             errors: error_rx,
             name,
             cgroup,
+            memory_update_lock: Mutex::new(()),
         })
     }
 

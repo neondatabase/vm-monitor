@@ -14,10 +14,14 @@ futures-util = "0.3.28"
 inotify = "0.10.1"
 notify = "6.0.0"
 postgres = "0.19.5"
+serde = { version = "1.0.164", features = ["derive"] }
+serde_json = "1.0.96"
 sysinfo = "0.29.2"
-tokio = { version = "1.28.2", features = ["macros"]}
+tokio = { version = "1.28.2", features = ["macros", "rt-multi-thread"]}
 tokio-postgres = "0.7.8"
+tokio-tungstenite = "0.19.0"
 tracing = "0.1.37"
+uuid = { version = "1.3.4", features = ["serde"] }
 
 [patch.crates-io]
 cgroups-rs = { git = "https://github.com/fprasx/cgroups-rs.git", rev="2de7a8506d1c2b9dd4bfc58ae1bf5a5ab07c53c1" }

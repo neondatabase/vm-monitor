@@ -3,15 +3,16 @@
 
 use std::{future, sync::Arc, time::Instant};
 
+use anyhow::{Context, Result};
+use async_std::channel::{self, Receiver, Sender};
+use tracing::info;
+
 use crate::{
     manager::{Manager, MemoryLimits},
     mib,
     timer::Timer,
     MiB,
 };
-use anyhow::{Context, Result};
-use async_std::channel::{self, Receiver, Sender};
-use tracing::info;
 
 pub struct CgroupState {
     manager: Manager,
