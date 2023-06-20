@@ -258,7 +258,7 @@ impl Manager {
     }
 
     pub fn set_high_bytes(&self, bytes: u64) -> Result<()> {
-        self.memory_update_lock.lock().unwrap();
+        let _ = self.memory_update_lock.lock();
         Ok(self
             .memory()
             .context("Failed to get memory subsystem while setting memory.high")?
@@ -272,7 +272,7 @@ impl Manager {
     }
 
     pub fn set_limits(&self, limits: MemoryLimits) -> Result<()> {
-        self.memory_update_lock.lock().unwrap();
+        let _ = self.memory_update_lock.lock();
         Ok(self
             .memory()
             .context("Failed to get memory subsystem while setting memory limits")?
@@ -286,7 +286,7 @@ impl Manager {
     }
 
     pub fn get_high_bytes(&self) -> Result<u64> {
-        self.memory_update_lock.lock().unwrap();
+        let _ = self.memory_update_lock.lock();
         let high = self
             .memory()
             .context("Failed to get memory subsystem while getting memory statistics")?
