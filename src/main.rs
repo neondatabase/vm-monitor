@@ -1,17 +1,12 @@
 use anyhow::Result;
 use clap::Parser;
-use compute_ctl::bridge::handle_connection;
 use compute_ctl::Args;
-use tokio::net::TcpListener;
+use compute_ctl::monitor::Monitor;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    env_logger::init();
     let args = Args::parse();
-    let addr = "127.0.0.1:3333";
-    let listener = TcpListener::bind(&addr).await?;
-
-    loop {
-        let (stream, _) = listener.accept().await?;
-        tokio::spawn(handle_connection(stream)).await??;
-    }
+    let _monitor = Monitor::new(Default::default(), args).await?;
+    loop {} // Let the monitor run in the background
 }

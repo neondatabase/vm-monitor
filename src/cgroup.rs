@@ -14,6 +14,7 @@ use crate::{
     MiB,
 };
 
+#[derive(Debug)]
 pub struct CgroupState {
     manager: Manager,
     config: CgroupConfig,
@@ -21,6 +22,7 @@ pub struct CgroupState {
     upscale_events_receiver: Receiver<()>,
 }
 
+#[derive(Debug)]
 pub struct CgroupConfig {
     // oom_buffer_bytes gives the target difference between the total memory reserved for the cgroup
     // and the value of the cgroup's memory.high.
@@ -103,13 +105,17 @@ impl CgroupState {
         self.manager.current_memory_usage()
     }
 
+    #[tracing::instrument]
     pub async fn received_upscale(&self) {
+        info!("Receied upscale. Notifying.");
         // The receiver will not be dropped/closed it is also contained in self,
         // so the unwrap is safe
         self.upscale_events_sender.send(()).await.unwrap();
     }
 
+    #[tracing::instrument]
     pub async fn set_memory_limits(&mut self, available_memory: u64) -> Result<()> {
+        info!("Setting memory limits for cgroup {}", self.manager.name);
         let new_high = self.config.calculate_memory_high_value(available_memory);
         info!(
             "Total memory available for cgroup {} is {} MiB. Setting cgroup memory.",
@@ -132,10 +138,12 @@ impl CgroupState {
         Ok(())
     }
 
+    #[tracing::instrument]
     pub async fn handle_cgroup_signals_loop(self: &Arc<Self>) {
         // FIXME: we should have "proper" error handling instead of just panicking. It's hard to
         // determine what the correct behavior should be if a cgroup operation fails, though.
         let state = Arc::clone(self);
+        info!("Starting main signals loop for {}", state.manager.name);
         // let errors = state.manager.errors.clone();
         // let highs = state.manager.highs.clone();
         // let upscale_events_receiver = state.upscale_events_receiver.clone();
@@ -183,6 +191,7 @@ impl CgroupState {
                                         }
                                         _ = future::ready(()) => {
                                             // TODO: could just unwrap
+                                            info!("Requesting upscale.");
                                             match state.request_upscale().await {
                                                 Ok(_) => {},
                                                 Err(e) => panic!("Error requesting upscale {e}")
@@ -200,6 +209,7 @@ impl CgroupState {
                                                     return;
                                                 }
                                                 _ = future::ready(()) => {
+                                                    info!("Requesting upscale.");
                                                     // TODO: could just unwrap
                                                     match state.request_upscale().await {
                                                         Ok(_) => {},
@@ -241,6 +251,7 @@ impl CgroupState {
         });
     }
 
+    #[tracing::instrument]
     pub async fn handle_memory_high_event(&self) -> Result<bool> {
         tokio::select! {
             biased;
@@ -296,7 +307,9 @@ impl CgroupState {
         return Ok(!upscaled);
     }
 
+    // TODO
+    #[tracing::instrument]
     pub async fn request_upscale(&self) -> Result<()> {
-        todo!()
+        Ok(())
     }
 }

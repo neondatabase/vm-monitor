@@ -10,6 +10,7 @@ pub struct FileCacheState {
     pub(crate) config: FileCacheConfig,
 }
 
+#[derive(Debug)]
 pub struct FileCacheConfig {
     /// InMemory indicates whether the file cache is *actually* stored in memory (e.g. by writing to
     /// a tmpfs or shmem file). If true, the size of the file cache will be counted against the
@@ -180,7 +181,7 @@ impl FileCacheState {
             ""
         };
 
-        info!("Update file cache size to {num_mb}MiB{capped}, max size = {max_mb}",);
+        info!("Updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}",);
 
         self.conn
             .execute(

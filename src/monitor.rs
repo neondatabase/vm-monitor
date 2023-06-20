@@ -28,6 +28,7 @@ pub struct Monitor {
     file_cache_reserved_bytes: u64,
 }
 
+#[derive(Debug)]
 pub struct MonitorConfig {
     /// `sys_buffer_bytes` gives the estimated amount of memory, in bytes, that the kernel uses before
     /// handing out the rest to userspace. This value is the estimated difference between the
@@ -54,6 +55,7 @@ impl Default for MonitorConfig {
 }
 
 impl Monitor {
+    #[tracing::instrument]
     pub async fn new(config: MonitorConfig, args: Args) -> Result<Self> {
         if config.sys_buffer_bytes == 0 {
             bail!("invalid MonitorConfig: ssy_buffer_bytes cannot be 0")
@@ -72,6 +74,7 @@ impl Monitor {
         // allocated to the file cache is appropriately taken into account when we decide the cgroup's
         // memory limits.
         if let Some(connstr) = args.file_cache_conn_str {
+            info!("Initializing file cache.");
             let config: FileCacheConfig = Default::default();
             if !config.in_memory {
                 panic!("file cache not in-memory implemented")

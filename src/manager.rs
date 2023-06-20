@@ -9,7 +9,6 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Mutex,
     },
-    time::Duration,
 };
 
 use anyhow::{anyhow, bail, Context, Error, Result};
@@ -25,11 +24,11 @@ use cgroups_rs::{
 use futures_util::StreamExt;
 use inotify::{Inotify, WatchMask};
 use notify::Event;
-use tokio::time;
 use tracing::{info, warn};
 
 use crate::timer::Timer;
 
+#[derive(Debug)]
 pub struct Manager {
     /// Receives updates on memory high events
     ///
@@ -95,6 +94,7 @@ impl MemoryLimits {
 impl Manager {
     /// Load the cgroup named `name`. This should just be the name of the cgroup,
     /// and not include anything like /sys/fs/cgroups
+    #[tracing::instrument]
     pub async fn new(name: String) -> Result<Self> {
         // TODO: check for cgroup mode
         if !is_cgroup2_unified_mode() {
@@ -102,6 +102,8 @@ impl Manager {
         }
 
         let cgroup = Cgroup::load(hierarchies::auto(), &name);
+
+        info!("Creating file watcher for memory.high events");
 
         // Set up a watcher that notifies on changes to memory.events
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
@@ -133,10 +135,10 @@ impl Manager {
                 // iteration because of how waiter is initialized.
                 tokio::select! {
                     biased;
-                    _ = waiter => (),
+                    _ = &mut waiter => (),
                     _ = future::ready(()) => {
-                        info!("Respecting minimum wait of {min_wait:?} before restarting memory.events listener");
-                        tokio::spawn(time::sleep(Duration::from_secs(0))).await.unwrap();
+                        info!("Respecting minimum wait of {min_wait:?} ms before restarting memory.events listener");
+                        (&mut waiter).await;
                         info!("Restarting memory.events listener")
                     }
                 };
