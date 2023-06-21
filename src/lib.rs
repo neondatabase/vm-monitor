@@ -24,6 +24,9 @@ pub fn get_total_system_memory() -> u64 {
 
 /// Code that interfaces with agent
 pub mod bridge;
+pub mod transport;
+
+
 pub mod cgroup;
 pub mod filecache;
 pub mod manager;

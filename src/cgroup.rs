@@ -308,8 +308,8 @@ impl CgroupState {
     }
 
     // TODO
-    #[tracing::instrument]
-    pub async fn request_upscale(&self) -> Result<()> {
-        Ok(())
-    }
+    // #[tracing::instrument]
+    // pub async fn request_upscale(&self) -> Result<()> {
+    //     Ok(())
+    // }
 }

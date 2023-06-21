@@ -148,6 +148,7 @@ impl Manager {
                 // Read memory.events and send an update down the channel if the number of high events
                 // has increased
                 if let Some(val) = events.next().await {
+                    info!("Got memory high event");
                     match val {
                         Ok(_) => {
                             if let Ok(high) = Self::get_event_count(&name_clone, MemoryEvent::High)
@@ -275,14 +276,20 @@ impl Manager {
 
     pub fn set_limits(&self, limits: MemoryLimits) -> Result<()> {
         let _ = self.memory_update_lock.lock();
+        info!(
+            "Writing new memory limits: high => {}, max => {}",
+            limits.high, limits.max
+        );
         Ok(self
             .memory()
             .context("Failed to get memory subsystem while setting memory limits")?
             .set_mem(cgroups_rs::memory::SetMemory {
-                low: Some(MaxValue::Value(limits.max.max(i64::MAX as u64) as i64)),
-                high: Some(MaxValue::Value(limits.high.max(i64::MAX as u64) as i64)),
                 min: None,
-                max: None,
+                low: None,
+                high: Some(MaxValue::Value(
+                    u64::max(limits.high, i64::MAX as u64) as i64
+                )),
+                max: Some(MaxValue::Value(u64::max(limits.max, i64::MAX as u64) as i64)),
             })
             .context("Failed to set memory limits")?)
     }
