@@ -1,12 +1,14 @@
 // TODO: should all fields be pub(crate)?
 
 use anyhow::{bail, Context, Result};
-use postgres::Client;
+use tokio_postgres::Client;
 use tokio_postgres::NoTls;
 use tracing::info;
+use tracing::warn;
 
+#[derive(Debug)]
 pub struct FileCacheState {
-    conn: Client,
+    client: Client,
     pub(crate) config: FileCacheConfig,
 }
 
@@ -135,19 +137,29 @@ impl FileCacheConfig {
 }
 
 impl FileCacheState {
-    pub fn new(conn_str: &str, config: FileCacheConfig) -> Result<Self> {
-        let conn = Client::connect(conn_str, NoTls).context("Failed to connect to pg client")?;
+    pub async fn new(conn_str: &str, config: FileCacheConfig) -> Result<Self> {
+        let (client, conn) = tokio_postgres::connect(conn_str, NoTls)
+            .await
+            .context("Failed to connect to pg client")?;
+
+        tokio::spawn(async move {
+            if let Err(e) = conn.await {
+                warn!("postgres error: {e}")
+            }
+        });
+
         config.validate().context("File cache config is invalid")?;
-        Ok(Self { conn, config })
+        Ok(Self { client, config })
     }
 
-    pub fn get_file_cache_size(&mut self) -> Result<u64> {
+    pub async fn get_file_cache_size(&self) -> Result<u64> {
         Ok(self
-            .conn
+            .client
             .query_one(
                 "SELECT pg_size_bytes(current_setting('neon.file_cache_size_limit'));",
                 &[],
             )
+            .await
             .context("Failed to query pg for file cache size")?
             // pg_size_bytes returns a bigint which is the same as an i64.
             .try_get::<_, i64>(0)
@@ -156,13 +168,14 @@ impl FileCacheState {
             .context("Failed to extract file cache size from query result")?)
     }
 
-    pub fn set_file_cache_size(&mut self, num_bytes: u64) -> Result<u64> {
+    pub async fn set_file_cache_size(&self, num_bytes: u64) -> Result<u64> {
         let max_bytes = self
-            .conn
+            .client
             .query_one(
                 "SELECT pg_size_bytes(current_setting('neon.max_file_cache_size'));",
                 &[],
             )
+            .await
             .context("Failed to query pg for max file cache size")?
             .try_get::<_, i64>(0)
             .map(|bytes| bytes as u64)
@@ -183,15 +196,17 @@ impl FileCacheState {
 
         info!("Updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}",);
 
-        self.conn
+        self.client
             .execute(
                 &format!("ALTER SYSTEM SET neon.file_cache_size_limit = {};", num_mb),
                 &[],
             )
+            .await
             .context("Failed to change file cache size limit")?;
 
-        self.conn
+        self.client
             .execute("SELECT pg_reload_conf();", &[])
+            .await
             .context("Failed to reload config")?;
 
         Ok(num_mb * (1 << 20))

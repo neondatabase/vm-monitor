@@ -15,9 +15,15 @@ pub struct Packet {
     pub seqnum: usize,
 }
 
+impl Packet {
+    pub fn new(stage: Stage, seqnum: usize) -> Self {
+        Self { stage, seqnum }
+    }
+}
+
 /// Communication between monitor and informant happens in three steps.
 /// 1. One party sends the other a `Packet` containing a `Request`
-/// 2. The other party performs some action to generate a `Response`, whic
+/// 2. The other party performs some action to generate a `Response`, which
 ///    it sends back.
 /// 3. The originial sender sends back a `Done` upon receiving the response.
 ///
@@ -36,20 +42,38 @@ pub enum Stage {
 #[serde(tag = "type")]
 pub enum Request {
     // Monitor initiated
-    RequestUpscale { cpu: u64, mem: u64 },
+    RequestUpscale,
 
     // Informant initiated
-    NotifyUpscale { cpu: u64, mem: u64 },
-    TryDownscale { cpu: u64, mem: u64 },
+    NotifyUpscale(Resources),
+    TryDownscale(Resources),
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum Response {
     // Informant sent
-    UpscaleResult,
+    UpscaleResult(Resources),
 
     // Monitor sent
     ResourceConfirmation,
-    DownscaleResult { ok: bool, status: String },
+    DownscaleResult(DownscaleStatus),
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct Resources {
+    pub(crate) cpu: u64,
+    pub(crate) mem: u64,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct DownscaleStatus {
+    ok: bool,
+    status: String,
+}
+
+impl DownscaleStatus {
+    pub fn new(ok: bool, status: String) -> Self {
+        Self { ok, status }
+    }
 }

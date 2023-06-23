@@ -17,113 +17,96 @@
 ///
 /// The monitor and informant are connected via websocket on port 10369
 ///
-use anyhow::Result;
+use anyhow::{Context, Result};
+use async_std::channel::{Receiver, Sender};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use serde::Serialize;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
+    sync::oneshot,
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+
 use crate::transport::*;
 
-use crate::cgroup::CgroupState;
+// pub async fn handle_connection(stream: TcpStream, handler: ) -> Result<()> {
+//     let dispatcher = Dispatcher::new(stream, 0).await?;
+//     dispatcher.run(handler).await
+// }
 
-pub async fn handle_connection(stream: TcpStream) -> Result<()> {
-    let dispatcher = Dispatcher::new(stream, 0, handler).await?;
-    dispatcher.run().await
+// fn handler(msg: Message) -> Option<Packet> {
+//     let decoded: Packet = match msg {
+//         Message::Text(text) => serde_json::from_str(&text).unwrap(),
+//         Message::Binary(bytes) => serde_json::from_slice(&bytes).unwrap(),
+//         _ => panic!("non text/binary packet"),
+//     };
+//     match decoded.stage {
+//         Stage::Request(req) => {
+//             let res = match req {
+//                 Request::NotifyUpscale(resources) => Response::ResourceConfirmation,
+//                 Request::TryDownscale(resource) => Response::DownscaleResult(DownscaleStatus::new(
+//                     true,
+//                     "everything is ok".to_string(),
+//                 )),
+//                 Request::RequestUpscale { .. } => {
+//                     unreachable!("Informant should never send a Request::RequestUpscale")
+//                 }
+//             };
+//             Some(Packet {
+//                 stage: Stage::Response(res),
+//                 seqnum: 0, // FIXME
+//             })
+//         }
+//
+//         Stage::Response(res) => match res {
+//             Response::UpscaleResult => Some(Packet {
+//                 stage: Stage::Done,
+//                 seqnum: 0, // FIXME
+//             }),
+//             Response::ResourceConfirmation => {
+//                 unreachable!("Monitor should never receive a Response::ResourceConfirmation")
+//             }
+//             Response::DownscaleResult { .. } => {
+//                 unreachable!("Monitor should never receive a Response::DownscaleResult")
+//             }
+//         },
+//         Stage::Done => None, // Yay!! :)
+//     }
+// }
+
+pub struct Dispatcher<S> {
+    pub(crate) source: SplitStream<WebSocketStream<S>>,
+    pub(crate) sink: SplitSink<WebSocketStream<S>, Message>,
+
+    pub(crate) notify_upscale_events: Sender<(Resources, oneshot::Sender<()>)>,
+    pub(crate) request_upscale_events: Receiver<oneshot::Sender<()>>, // TODO: if needed, make state some arc mutex thing or an atomic
 }
 
-fn handler(seqnum: &mut usize, msg: Message) -> Option<Packet> {
-    let decoded: Packet = match msg {
-        Message::Text(text) => serde_json::from_str(&text).unwrap(),
-        Message::Binary(bytes) => serde_json::from_slice(&bytes).unwrap(),
-        _ => panic!("non text/binary packet"),
-    };
-    *seqnum += 1;
-    match decoded.stage {
-        Stage::Request(req) => {
-            let res = match req {
-                Request::RequestUpscale { cpu, mem } => {
-                    unreachable!("Informant should never send a Request::RequestUpscale")
-                }
-                Request::NotifyUpscale { cpu, mem } => Response::ResourceConfirmation {},
-                Request::TryDownscale { cpu, mem } => Response::DownscaleResult {
-                    ok: true,
-                    status: String::from("everything is ok"),
-                },
-            };
-            Some(Packet {
-                stage: Stage::Response(res),
-                seqnum: *seqnum,
-            })
-        }
-        Stage::Response(res) => Some(Packet {
-            stage: Stage::Done,
-            seqnum: *seqnum,
-        }),
-        Stage::Done => None,
-    }
-}
-
-struct Dispatcher<T, U, S> {
-    // conn: WebSocketStream<S>,
-    source: SplitStream<WebSocketStream<S>>,
-    sink: SplitSink<WebSocketStream<S>, Message>,
-    state: U,
-    handler: fn(&mut U, Message) -> T,
-}
-
-impl<T, U, S> Dispatcher<T, U, S>
+impl<S> Dispatcher<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    T: Serialize,
 {
-    pub async fn new(stream: S, state: U, handler: fn(&mut U, Message) -> T) -> Result<Self> {
+    pub async fn new(
+        stream: S,
+        notify_upscale_events: Sender<(Resources, oneshot::Sender<()>)>,
+        request_upscale_events: Receiver<oneshot::Sender<()>>,
+    ) -> Result<Self> {
         let (sink, source) = accept_async(stream).await?.split();
         Ok(Self {
             sink,
             source,
-            state,
-            handler,
+            notify_upscale_events,
+            request_upscale_events,
         })
     }
 
-    pub async fn run(mut self) -> Result<()> {
-        while let Some(msg) = self.source.next().await {
-            println!("Received: {msg:?}");
-            // Maybe have another thread do this work? Can lead to out of order
-            match msg {
-                Ok(msg) => {
-                    let ret = self.handle(msg);
-                    let json = serde_json::to_string(&ret).unwrap();
-                    self.sink.send(Message::Text(json)).await.unwrap();
-                }
-                Err(e) => println!("{e}"),
-            }
-        }
-        Ok(())
-    }
-
-    fn handle(&mut self, msg: Message) -> T {
-        (self.handler)(&mut self.state, msg)
+    pub async fn send(&mut self, p: Packet) -> Result<()> {
+        let json = serde_json::to_string(&p).context("failed to serialize packet")?;
+        self.sink
+            .send(Message::Text(json))
+            .await
+            .map_err(|e| e.into()) // Sink returns some weird error that we need to convert
     }
 }
-
-// TODO: implement methods here to make clear that these methods interface with
-// informant?
-impl CgroupState {
-    #[tracing::instrument]
-    pub async fn request_upscale(&self) -> Result<()> {
-        Ok(())
-    }
-
-    #[tracing::instrument]
-    pub async fn try_downscale(&self) -> Result<()> {
-        Ok(())
-    }
-}
-

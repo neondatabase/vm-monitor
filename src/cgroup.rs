@@ -4,22 +4,26 @@
 use std::{future, sync::Arc, time::Instant};
 
 use anyhow::{Context, Result};
-use async_std::channel::{self, Receiver, Sender};
+use async_std::channel::{Receiver, Sender};
+use tokio::sync::oneshot;
 use tracing::info;
 
 use crate::{
     manager::{Manager, MemoryLimits},
     mib,
     timer::Timer,
+    transport::Resources,
     MiB,
 };
 
 #[derive(Debug)]
 pub struct CgroupState {
-    manager: Manager,
-    config: CgroupConfig,
-    upscale_events_sender: Sender<()>,
-    upscale_events_receiver: Receiver<()>,
+    pub(crate) manager: Manager,
+    pub(crate) config: CgroupConfig,
+
+    // For communication with dispatcher
+    notify_upscale_events: Receiver<(Resources, oneshot::Sender<()>)>,
+    request_upscale_events: Sender<oneshot::Sender<()>>,
 }
 
 #[derive(Debug)]
@@ -40,7 +44,7 @@ pub struct CgroupConfig {
     //
     // TODO: there's some minor issues with this approach -- in particular, that we might have
     // memory in use by the kernel's page cache that we're actually ok with getting rid of.
-    memory_high_buffer_bytes: u64,
+    pub(crate) memory_high_buffer_bytes: u64,
 
     // max_upscale_wait_millis gives the maximum duration, in milliseconds, that we're allowed to pause
     // the cgroup for while waiting for the autoscaler-agent to upscale us
@@ -91,13 +95,17 @@ impl CgroupConfig {
 }
 
 impl CgroupState {
-    pub fn new(manager: Manager, config: CgroupConfig) -> Self {
-        let (upscale_events_sender, upscale_events_receiver) = channel::bounded(1);
+    pub fn new(
+        manager: Manager,
+        config: CgroupConfig,
+        notify_upscale_events: Receiver<(Resources, oneshot::Sender<()>)>,
+        request_upscale_events: Sender<oneshot::Sender<()>>,
+    ) -> Self {
         Self {
             manager,
             config,
-            upscale_events_sender,
-            upscale_events_receiver,
+            notify_upscale_events,
+            request_upscale_events,
         }
     }
 
@@ -105,15 +113,7 @@ impl CgroupState {
         self.manager.current_memory_usage()
     }
 
-    #[tracing::instrument]
-    pub async fn received_upscale(&self) {
-        info!("Receied upscale. Notifying.");
-        // The receiver will not be dropped/closed it is also contained in self,
-        // so the unwrap is safe
-        self.upscale_events_sender.send(()).await.unwrap();
-    }
-
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     pub async fn set_memory_limits(&mut self, available_memory: u64) -> Result<()> {
         info!("Setting memory limits for cgroup {}", self.manager.name);
         let new_high = self.config.calculate_memory_high_value(available_memory);
@@ -138,7 +138,7 @@ impl CgroupState {
         Ok(())
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     pub async fn handle_cgroup_signals_loop(self: &Arc<Self>) {
         // FIXME: we should have "proper" error handling instead of just panicking. It's hard to
         // determine what the correct behavior should be if a cgroup operation fails, though.
@@ -146,7 +146,7 @@ impl CgroupState {
         info!("Starting main signals loop for {}", state.manager.name);
         // let errors = state.manager.errors.clone();
         // let highs = state.manager.highs.clone();
-        // let upscale_events_receiver = state.upscale_events_receiver.clone();
+        // let notify_upscale_events = state.upscale_events_receiver.clone();
         tokio::spawn(async move {
             let mut waiting_on_upscale = false;
             let mut wait_to_increase_memory_high = Timer::new(0);
@@ -162,7 +162,7 @@ impl CgroupState {
                         }
                     }
 
-                    _ = state.upscale_events_receiver.recv() => {
+                    _ = state.notify_upscale_events.recv() => {
                         info!("Received upscale event");
                         let _ = state.manager.highs.recv().await;
                     }
@@ -185,7 +185,7 @@ impl CgroupState {
 
                                     tokio::select! {
                                         biased;
-                                        _ = state.upscale_events_receiver.recv() => {
+                                        _ = state.notify_upscale_events.recv() => {
                                             info!("No need to request upscaling because we were already upscaled");
                                             return;
                                         }
@@ -204,7 +204,7 @@ impl CgroupState {
                                         _ = &mut wait_to_increase_memory_high => {
                                             tokio::select! {
                                                 biased;
-                                                _ = state.upscale_events_receiver.recv() => {
+                                                _ = state.notify_upscale_events.recv() => {
                                                     info!("No need to request upscaling because we were already upscaled");
                                                     return;
                                                 }
@@ -239,25 +239,24 @@ impl CgroupState {
                                             // Can't do anything
                                         }
                                     }
-                                    info!("Received memory.high event, too soon to re-freeze, but increasing memory.high");
 
+                                    info!("Received memory.high event, too soon to re-freeze, but increasing memory.high");
                                 }
                             }
                         }
                     }
-
                 }
             }
         });
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     pub async fn handle_memory_high_event(&self) -> Result<bool> {
         tokio::select! {
             biased;
 
-            _ = self.upscale_events_receiver.recv() => {
-                info!("Skipping memory.high event because there was an upscale vent");
+            _ = self.notify_upscale_events.recv() => {
+                info!("Skipping memory.high event because there was an upscale event");
                 return Ok(false);
             },
 
@@ -287,7 +286,7 @@ impl CgroupState {
         let total_wait;
 
         tokio::select! {
-            _ = self.upscale_events_receiver.recv() => {
+            _ = self.notify_upscale_events.recv() => {
                 total_wait = start.elapsed();
                 info!("Received notification that upscale occured after {total_wait:?}. Thawing cgroup.");
                 upscaled = false;
@@ -307,9 +306,11 @@ impl CgroupState {
         return Ok(!upscaled);
     }
 
-    // TODO
-    // #[tracing::instrument]
-    // pub async fn request_upscale(&self) -> Result<()> {
-    //     Ok(())
-    // }
+    #[tracing::instrument(skip(self))]
+    pub async fn request_upscale(&self) -> Result<()> {
+        let (tx, rx) = oneshot::channel();
+        self.request_upscale_events.send(tx).await?;
+        rx.await?;
+        Ok(())
+    }
 }
