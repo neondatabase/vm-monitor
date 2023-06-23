@@ -31,18 +31,18 @@ impl Packet {
 /// (or not handling) packets based on their sequence numbers. This will
 /// allow us to detect racy behaviour and unfavorable interleavings.
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(tag = "stage")]
+#[serde(rename_all = "camelCase")]
 pub enum Stage {
     Request(Request),
     Response(Response), // Maybe make this option<response> to signal cancellation
-    Done,
+    Done {}, // Because of the way go serializes struct{}
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(tag = "type")]
+#[serde(rename_all = "camelCase")]
 pub enum Request {
     // Monitor initiated
-    RequestUpscale,
+    RequestUpscale {}, // Because of the way go serializes struct{}
 
     // Informant initiated
     NotifyUpscale(Resources),
@@ -50,13 +50,13 @@ pub enum Request {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(tag = "type")]
+#[serde(rename_all = "camelCase")]
 pub enum Response {
     // Informant sent
     UpscaleResult(Resources),
 
     // Monitor sent
-    ResourceConfirmation,
+    ResourceConfirmation {}, // Because of the way go serializes struct{}
     DownscaleResult(DownscaleStatus),
 }
 
@@ -64,6 +64,12 @@ pub enum Response {
 pub struct Resources {
     pub(crate) cpu: u64,
     pub(crate) mem: u64,
+}
+
+impl Resources {
+    pub fn new(cpu: u64, mem: u64) -> Self {
+        Self { cpu, mem }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

@@ -285,7 +285,7 @@ where
     pub async fn process_packet(&mut self, packet: Packet) -> Result<Option<Packet>> {
         match packet.stage {
             Stage::Request(req) => match req {
-                Request::RequestUpscale => {
+                Request::RequestUpscale {} => {
                     unreachable!("Informant should never send a Request::RequestUpscale")
                 }
                 Request::NotifyUpscale(resources) => {
@@ -298,7 +298,7 @@ where
                     rx.await?;
                     info!("Confirmed receipt of upscale by cgroup manager");
                     Ok(Some(Packet::new(
-                        Stage::Response(Response::ResourceConfirmation),
+                        Stage::Response(Response::ResourceConfirmation {}),
                         0, // FIXME
                     )))
                 }
@@ -320,18 +320,18 @@ where
                     rx.await?;
                     info!("Confirmed receipt of requested upscale by cgroup manager");
                     Ok(Some(Packet::new(
-                        Stage::Done,
+                        Stage::Done {},
                         0, // FIXME
                     )))
                 }
-                Response::ResourceConfirmation => {
+                Response::ResourceConfirmation {} => {
                     unreachable!("Informant should never receive a Response::ResourceConfirmation")
                 }
                 Response::DownscaleResult(_) => {
                     unreachable!("Informant should never receive a Response::DownscaleResult")
                 }
             },
-            Stage::Done => Ok(None), // yay! :)
+            Stage::Done {} => Ok(None), // yay! :)
         }
     }
 
@@ -343,7 +343,7 @@ where
             let msg = tokio::select! {
                 _ = self.dispatcher.request_upscale_events.recv() => {
                     self.dispatcher.send(
-                        Packet::new(Stage::Request(Request::RequestUpscale), 0)
+                        Packet::new(Stage::Request(Request::RequestUpscale {}), 0)
                     ).await?;
                     continue
                 }
