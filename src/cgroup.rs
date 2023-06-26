@@ -144,9 +144,6 @@ impl CgroupState {
         // determine what the correct behavior should be if a cgroup operation fails, though.
         let state = Arc::clone(self);
         info!("Starting main signals loop for {}", state.manager.name);
-        // let errors = state.manager.errors.clone();
-        // let highs = state.manager.highs.clone();
-        // let notify_upscale_events = state.upscale_events_receiver.clone();
         tokio::spawn(async move {
             let mut waiting_on_upscale = false;
             let mut wait_to_increase_memory_high = Timer::new(0);

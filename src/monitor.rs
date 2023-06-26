@@ -21,6 +21,7 @@ use crate::{
     Args, MiB,
 };
 
+#[derive(Debug)]
 pub struct Monitor<S> {
     config: MonitorConfig,
     filecache: Option<FileCacheState>,
@@ -281,6 +282,7 @@ where
         Ok(())
     }
 
+    #[tracing::instrument(skip(self))]
     pub async fn process_packet(&mut self, packet: Packet) -> Result<Option<Packet>> {
         let id = packet.id;
         match packet.stage {
@@ -336,15 +338,27 @@ where
     }
 
     // TODO: don't propagate errors, probably just warn!?
+    #[tracing::instrument(skip(self))]
     pub async fn run(&mut self) -> Result<()> {
         loop {
             // TODO: refactor this
             // check if we need to propagate a request
             let msg = tokio::select! {
-                _ = self.dispatcher.request_upscale_events.recv() => {
-                    self.dispatcher.send(
-                        Packet::new(Stage::Request(Request::RequestUpscale {}), 0)
-                    ).await?;
+                sender = self.dispatcher.request_upscale_events.recv() => {
+                    match sender {
+                        Ok(sender) => {
+                            info!("cgroup asking for upscale. Forwarding request.");
+                            self.dispatcher.send(
+                                Packet::new(Stage::Request(Request::RequestUpscale {}), 0)
+                            ).await?;
+                            if let Ok(_) = sender.send(()) {
+                                warn!("Error sending confirmation of upscale request to cgroup");
+                            };
+                        },
+                        Err(e) => warn!("Error receiving upscale event: {e}")
+
+                    }
+
                     continue
                 }
                 msg = self.dispatcher.source.next() => {

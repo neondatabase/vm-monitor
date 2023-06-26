@@ -31,51 +31,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 
 use crate::transport::*;
 
-// pub async fn handle_connection(stream: TcpStream, handler: ) -> Result<()> {
-//     let dispatcher = Dispatcher::new(stream, 0).await?;
-//     dispatcher.run(handler).await
-// }
-
-// fn handler(msg: Message) -> Option<Packet> {
-//     let decoded: Packet = match msg {
-//         Message::Text(text) => serde_json::from_str(&text).unwrap(),
-//         Message::Binary(bytes) => serde_json::from_slice(&bytes).unwrap(),
-//         _ => panic!("non text/binary packet"),
-//     };
-//     match decoded.stage {
-//         Stage::Request(req) => {
-//             let res = match req {
-//                 Request::NotifyUpscale(resources) => Response::ResourceConfirmation,
-//                 Request::TryDownscale(resource) => Response::DownscaleResult(DownscaleStatus::new(
-//                     true,
-//                     "everything is ok".to_string(),
-//                 )),
-//                 Request::RequestUpscale { .. } => {
-//                     unreachable!("Informant should never send a Request::RequestUpscale")
-//                 }
-//             };
-//             Some(Packet {
-//                 stage: Stage::Response(res),
-//                 seqnum: 0, // FIXME
-//             })
-//         }
-//
-//         Stage::Response(res) => match res {
-//             Response::UpscaleResult => Some(Packet {
-//                 stage: Stage::Done,
-//                 seqnum: 0, // FIXME
-//             }),
-//             Response::ResourceConfirmation => {
-//                 unreachable!("Monitor should never receive a Response::ResourceConfirmation")
-//             }
-//             Response::DownscaleResult { .. } => {
-//                 unreachable!("Monitor should never receive a Response::DownscaleResult")
-//             }
-//         },
-//         Stage::Done => None, // Yay!! :)
-//     }
-// }
-
+#[derive(Debug)]
 pub struct Dispatcher<S> {
     pub(crate) source: SplitStream<WebSocketStream<S>>,
     pub(crate) sink: SplitSink<WebSocketStream<S>, Message>,
