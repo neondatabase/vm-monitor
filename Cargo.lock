@@ -318,28 +318,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
 
 [[package]]
-name = "compute_ctl"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-std",
- "cgroups-rs",
- "clap",
- "env_logger",
- "futures-util",
- "inotify 0.10.1",
- "notify",
- "postgres",
- "serde",
- "serde_json",
- "sysinfo",
- "tokio",
- "tokio-postgres",
- "tokio-tungstenite",
- "tracing",
-]
-
-[[package]]
 name = "concurrent-queue"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1579,6 +1557,28 @@ name = "version_check"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
+
+[[package]]
+name = "vm-monitor"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-std",
+ "cgroups-rs",
+ "clap",
+ "env_logger",
+ "futures-util",
+ "inotify 0.10.1",
+ "notify",
+ "postgres",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tokio",
+ "tokio-postgres",
+ "tokio-tungstenite",
+ "tracing",
+]
 
 [[package]]
 name = "waker-fn"
