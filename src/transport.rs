@@ -12,12 +12,12 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Packet {
     pub stage: Stage,
-    pub seqnum: usize,
+    pub id: usize,
 }
 
 impl Packet {
-    pub fn new(stage: Stage, seqnum: usize) -> Self {
-        Self { stage, seqnum }
+    pub fn new(stage: Stage, id: usize) -> Self {
+        Self { stage, id }
     }
 }
 

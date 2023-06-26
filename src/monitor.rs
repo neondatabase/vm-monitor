@@ -3,12 +3,11 @@ use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
 use async_std::channel;
-use futures_util::{SinkExt, StreamExt};
+use futures_util::StreamExt;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::oneshot,
 };
-use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, trace, warn};
 
 use crate::{
@@ -283,6 +282,7 @@ where
     }
 
     pub async fn process_packet(&mut self, packet: Packet) -> Result<Option<Packet>> {
+        let id = packet.id;
         match packet.stage {
             Stage::Request(req) => match req {
                 Request::RequestUpscale {} => {
@@ -299,14 +299,14 @@ where
                     info!("Confirmed receipt of upscale by cgroup manager");
                     Ok(Some(Packet::new(
                         Stage::Response(Response::ResourceConfirmation {}),
-                        0, // FIXME
+                        id,
                     )))
                 }
                 Request::TryDownscale(resources) => Ok(Some(Packet::new(
                     Stage::Response(Response::DownscaleResult(
                         self.try_downscale(resources).await?,
                     )),
-                    0, // FIXME
+                    id,
                 ))),
             },
             Stage::Response(res) => match res {
