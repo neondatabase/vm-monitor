@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::{fmt::Debug, mem};
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
@@ -136,6 +136,14 @@ where
             state.cgroup = Some(cgroup_state);
 
             tokio::spawn(async move { clone.handle_cgroup_signals_loop().await });
+        } else {
+            // We need to forget the sender so that its drop impl does not get ran.
+            // This allows us to poll it in `Monitor::run` regardless of whether we
+            // are managing a cgroup or not. If we don't forget it, all receives will
+            // immediately return an error because the sender is droped and it will
+            // claim all select! statements, effectively turning `Monitor::run` into
+            // `loop { fail to receive }`.
+            mem::forget(requesting_send);
         }
 
         Ok(state)
