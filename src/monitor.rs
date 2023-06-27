@@ -374,7 +374,7 @@ where
                 }
             };
             if let Some(msg) = msg {
-                trace!("Received: {msg:?}");
+                debug!("Received: {msg:?}");
                 // Maybe have another thread do this work? Can lead to out of order?
                 match msg {
                     Ok(msg) => {
