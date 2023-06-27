@@ -8,7 +8,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::oneshot,
 };
-use tracing::{info, trace, warn};
+use tracing::{info, debug, warn};
 
 use crate::{
     bridge::Dispatcher,
