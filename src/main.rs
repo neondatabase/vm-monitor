@@ -1,12 +1,21 @@
 use anyhow::Result;
+use cfg_if::cfg_if;
 use clap::Parser;
+use tokio::net::TcpListener;
 use vm_monitor::monitor::Monitor;
 use vm_monitor::Args;
-use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
+    cfg_if! {
+        if #[cfg(debug_assertions)] {
+            let subscriber = tracing_subscriber::fmt().pretty().finish();
+        } else {
+            let subscriber = tracing_subscriber::fmt().json().finish();
+        }
+    };
+
+    tracing::subscriber::set_global_default(subscriber)?;
 
     let addr = "127.0.0.1:10369";
     let listener = TcpListener::bind(addr).await?;
