@@ -2,14 +2,11 @@ use anyhow::Result;
 use cfg_if::cfg_if;
 use clap::Parser;
 use tokio::net::TcpListener;
-use tracing::info;
-use tracing_subscriber::fmt::format::Pretty;
+use tracing::{info, error};
 use tracing_subscriber::EnvFilter;
-use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*};
 use vm_monitor::monitor::Monitor;
 use vm_monitor::Args;
 
-#[tokio::main]
 async fn main() -> Result<()> {
     let subscriber = tracing_subscriber::fmt::Subscriber::builder();
     cfg_if! {
@@ -32,5 +29,14 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     let mut monitor = Monitor::new(Default::default(), args, informant).await?;
-    monitor.run().await
+    match monitor.run().await {
+        Ok(_) => {
+            error!("Monitor stopped running but returned Ok(())");
+            unreachable!("Monitor stopped running but returned Ok(())")
+        }
+        Err(e) => {
+            error!("Monitor terminated on {e}");
+            return Err(e);
+        }
+    }
 }
