@@ -12,7 +12,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context, Error, Result};
-use async_std::channel::{self, Receiver};
+use async_std::channel::{self, Receiver, TryRecvError};
 use cgroups_rs::{
     cgroup::{Cgroup, UNIFIED_MOUNTPOINT},
     freezer::{FreezerController, FreezerState},
@@ -170,19 +170,20 @@ impl Manager {
         });
 
         // Log out an initial memory.events summary
-        match Self::get_event_count(&name, MemoryEvent::High) {
-            // TODO: change this to general memory information in the future?
-            Ok(high) => info!("The current number of memory high events: {high}"),
-            Err(e) => {
-                return Err(
-                    e.context("Failed to extract number of memory high events from memory.events")
-                )
-            }
-        }
+        // TODO: change this to general memory information in the future?
+        let high = Self::get_event_count(&name, MemoryEvent::High)
+            .context("Failed to extract number of memory high events from memory.events")?;
+        info!("The current number of memory high events: {high}");
 
         // Ignore the first set of events. We don't actually want to be notified
         // on startup since some processes might already be running.
-        event_rx.recv().await.unwrap();
+        // We don't want to block here as that would interrupt the rest of
+        // startup, so we use try_recv
+        if let Err(TryRecvError::Closed) = event_rx.try_recv() {
+            bail!(
+                "Failed to clear initial memory.high event count due to event channel being closed"
+            )
+        };
 
         Ok(Self {
             highs: event_rx,
