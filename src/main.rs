@@ -7,6 +7,7 @@ use tracing_subscriber::EnvFilter;
 use vm_monitor::monitor::Monitor;
 use vm_monitor::Args;
 
+#[tokio::main]
 async fn main() -> Result<()> {
     let subscriber = tracing_subscriber::fmt::Subscriber::builder();
     cfg_if! {
