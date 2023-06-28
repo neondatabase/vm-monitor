@@ -3,8 +3,8 @@
 
 use std::{future, sync::Arc, time::Instant};
 
-use anyhow::{Context, Result};
-use async_std::channel::{Receiver, Sender};
+use anyhow::{Context, Result, bail};
+use async_std::channel::{Receiver, Sender, TryRecvError};
 use tokio::sync::oneshot;
 use tracing::info;
 
@@ -123,7 +123,10 @@ impl CgroupState {
             mib(new_high)
         );
 
-        self.manager.highs.recv().await.unwrap();
+        // We don't want to block here, just clear any outstanding event if there is one
+        if let Err(TryRecvError::Closed) = self.manager.highs.try_recv() {
+            bail!("Failed to clear memory.high events due to channel being closed")
+        }
 
         let limits = MemoryLimits::new(new_high, available_memory);
 
@@ -298,7 +301,10 @@ impl CgroupState {
             .thaw()
             .with_context(|| format!("Failed to thaw cgroup {}", self.manager.name))?;
 
-        self.manager.highs.recv().await.unwrap();
+        // We don't want to block here, just clear any outstanding event if there is one
+        if let Err(TryRecvError::Closed) = self.manager.highs.try_recv() {
+            bail!("Failed to clear memory.high events due to channel being closed")
+        }
 
         return Ok(!upscaled);
     }
