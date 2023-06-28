@@ -348,6 +348,7 @@ where
     // TODO: don't propagate errors, probably just warn!?
     #[tracing::instrument(skip(self))]
     pub async fn run(&mut self) -> Result<()> {
+        info!("Starting dispatcher.");
         loop {
             // TODO: refactor this
             // check if we need to propagate a request
@@ -364,9 +365,7 @@ where
                             };
                         },
                         Err(e) => warn!("Error receiving upscale event: {e}")
-
                     }
-
                     continue
                 }
                 msg = self.dispatcher.source.next() => {
