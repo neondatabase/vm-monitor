@@ -119,17 +119,20 @@ where
         }
 
         if let Some(name) = args.cgroup {
+            info!("Creating manager");
             let manager = Manager::new(name)
                 .await
                 .context("Failed to create new manager")?;
             let config = Default::default();
 
+            info!("Creating cgroup state");
             let mut cgroup_state =
                 CgroupState::new(manager, config, notified_recv, requesting_send);
 
             let available = mem - file_cache_reserved_bytes;
 
             cgroup_state.set_memory_limits(available).await?;
+            info!(":here");
 
             let cgroup_state = Arc::new(cgroup_state);
             let clone = Arc::clone(&cgroup_state);
@@ -153,6 +156,7 @@ where
     #[tracing::instrument(skip(self))]
     pub async fn try_downscale(&self, target: Resources) -> Result<DownscaleStatus> {
         info!("Attempting to downscale to {target:?}");
+
         // Nothing to adjust
         if self.cgroup.is_none() && self.filecache.is_none() {
             info!("No action needed for downscale (no cgroup or file cache enabled)");
@@ -175,9 +179,11 @@ where
             new_cgroup_mem_high = cgroup
                 .config
                 .calculate_memory_high_value(usable_system_memory - expected_file_cache_mem_usage);
+
             let current = cgroup
                 .get_current_memory()
                 .context("Failed to fetch cgroup memory")?;
+
             if new_cgroup_mem_high < current + cgroup.config.memory_high_buffer_bytes {
                 let status = format!(
                     "{}: {} MiB (new high) < {} (current usage) + {} (buffer)",
@@ -186,6 +192,9 @@ where
                     mib(current),
                     mib(cgroup.config.memory_high_buffer_bytes)
                 );
+
+                info!("Discontinuing downscale: {status}");
+
                 return Ok(DownscaleStatus::new(false, status));
             }
         }
@@ -230,6 +239,9 @@ where
                 mib(available_memory)
             ));
         }
+
+        // TODO: make this status thing less jank
+        info!("Downscale successful: {}", status.join("; "));
 
         Ok(DownscaleStatus::new(true, status.join("; ")))
     }
@@ -373,7 +385,7 @@ where
                 }
             };
             if let Some(msg) = msg {
-                debug!("Received: {msg:?}");
+                debug!("Received packet: {msg:?}");
                 // Maybe have another thread do this work? Can lead to out of order?
                 match msg {
                     Ok(msg) => {
