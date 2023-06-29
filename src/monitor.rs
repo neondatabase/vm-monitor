@@ -1,5 +1,5 @@
-use std::{fmt::Debug, mem};
 use std::sync::Arc;
+use std::{fmt::Debug, mem};
 
 use anyhow::{bail, Context, Result};
 use async_std::channel;
@@ -8,7 +8,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::oneshot,
 };
-use tracing::{info, debug, warn, trace};
+use tracing::{debug, info, trace, warn};
 
 use crate::{
     bridge::Dispatcher,
@@ -363,7 +363,11 @@ where
     pub async fn run(&mut self) -> Result<()> {
         info!("Starting dispatcher.");
         loop {
-            trace!("heartbeat: polling");
+            trace!(
+                "heartbeat: polling, events in upscale channel: {}, receivers: {}",
+                self.dispatcher.notify_upscale_events.len(),
+                self.dispatcher.notify_upscale_events.receiver_count()
+            );
             // TODO: refactor this
             // check if we need to propagate a request
             let msg = tokio::select! {
