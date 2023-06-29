@@ -132,7 +132,6 @@ where
             let available = mem - file_cache_reserved_bytes;
 
             cgroup_state.set_memory_limits(available).await?;
-            info!(":here");
 
             let cgroup_state = Arc::new(cgroup_state);
             let clone = Arc::clone(&cgroup_state);
@@ -413,7 +412,7 @@ where
                             self.dispatcher.send(out).await?;
                         }
                     }
-                    Err(e) => println!("{e}"),
+                    Err(e) => warn!("{e}"),
                 }
             } else {
                 bail!("connection closed")

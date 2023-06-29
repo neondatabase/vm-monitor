@@ -3,7 +3,7 @@
 
 use std::{future, sync::Arc, time::Instant};
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use async_std::channel::{Receiver, Sender, TryRecvError};
 use tokio::sync::oneshot;
 use tracing::info;
@@ -162,8 +162,19 @@ impl CgroupState {
                         }
                     }
 
-                    _ = state.notify_upscale_events.recv() => {
+                    bundle = state.notify_upscale_events.recv() => {
                         info!("Received upscale event");
+                        match bundle {
+                            Ok((resources, tx)) => {
+                                info!("cgroup manager confirming upscale of {resources:?}");
+                                // Report back that we're done handling the event.
+                                // This is *important* as the dispatcher is waiting on hearing back!
+                                if let Err(_) = tx.send(()) {
+                                    panic!("error confirming receipt of upscale");
+                                }
+                            }
+                            Err(e) => panic!("error listening for upscales, {e}")
+                        }
                         let _ = state.manager.highs.recv().await;
                     }
 
@@ -185,9 +196,18 @@ impl CgroupState {
 
                                     tokio::select! {
                                         biased;
-                                        _ = state.notify_upscale_events.recv() => {
+                                        bundle = state.notify_upscale_events.recv() => {
                                             info!("No need to request upscaling because we were already upscaled");
-                                            return;
+                                            match bundle {
+                                                Ok((_, tx)) => {
+                                                    // Report back that we're done handling the event.
+                                                    // This is *important* as the dispatcher is waiting on hearing back!
+                                                    if let Err(_) = tx.send(()) {
+                                                        panic!("error confirming receipt of upscale");
+                                                    }
+                                                }
+                                                Err(e) => panic!("error listening for upscales, {e}")
+                                            }
                                         }
                                         _ = future::ready(()) => {
                                             // TODO: could just unwrap
@@ -204,10 +224,20 @@ impl CgroupState {
                                         _ = &mut wait_to_increase_memory_high => {
                                             tokio::select! {
                                                 biased;
-                                                _ = state.notify_upscale_events.recv() => {
+                                                bundle = state.notify_upscale_events.recv() => {
                                                     info!("No need to request upscaling because we were already upscaled");
-                                                    return;
-                                                }
+                                                    match bundle {
+                                                        Ok((_, tx)) => {
+                                                            // Report back that we're done handling the event.
+                                                            // This is *important* as the dispatcher is waiting on hearing back!
+                                                            if let Err(_) = tx.send(()) {
+                                                                panic!("error confirming receipt of upscale");
+                                                            }
+                                                        }
+                                                        Err(e) => panic!("error listening for upscales, {e}")
+                                                    }
+                                                        return;
+                                                    }
                                                 _ = future::ready(()) => {
                                                     info!("Requesting upscale.");
                                                     // TODO: could just unwrap
@@ -255,8 +285,18 @@ impl CgroupState {
         tokio::select! {
             biased;
 
-            _ = self.notify_upscale_events.recv() => {
+            bundle = self.notify_upscale_events.recv() => {
                 info!("Skipping memory.high event because there was an upscale event");
+                match bundle {
+                    Ok((_, tx)) => {
+                        // Report back that we're done handling the event.
+                        // This is *important* as the dispatcher is waiting on hearing back!
+                        if let Err(_) = tx.send(()) {
+                            panic!("error confirming receipt of upscale");
+                        }
+                    }
+                    Err(e) => panic!("error listening for upscales, {e}")
+                }
                 return Ok(false);
             },
 
@@ -286,9 +326,19 @@ impl CgroupState {
         let total_wait;
 
         tokio::select! {
-            _ = self.notify_upscale_events.recv() => {
+            bundle = self.notify_upscale_events.recv() => {
                 total_wait = start.elapsed();
                 info!("Received notification that upscale occured after {total_wait:?}. Thawing cgroup.");
+                match bundle {
+                    Ok((_, tx)) => {
+                        // Report back that we're done handling the event.
+                        // This is *important* as the dispatcher is waiting on hearing back!
+                        if let Err(_) = tx.send(()) {
+                            panic!("error confirming receipt of upscale");
+                        }
+                    }
+                    Err(e) => panic!("error listening for upscales, {e}")
+                }
                 upscaled = false;
             }
             _ = must_thaw => {
