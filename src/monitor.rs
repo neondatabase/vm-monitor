@@ -298,6 +298,8 @@ where
             cgroup.manager.set_limits(limits)?;
         }
 
+        info!("Finished handling upscale"); // debug
+
         Ok(())
     }
 
