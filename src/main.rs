@@ -2,10 +2,11 @@ use anyhow::Result;
 use cfg_if::cfg_if;
 use clap::Parser;
 use tokio::net::TcpListener;
-use tracing::{info, error};
+use tracing::{info, error, trace};
 use tracing_subscriber::EnvFilter;
 use vm_monitor::monitor::Monitor;
 use vm_monitor::Args;
+use vm_monitor::timer::Timer;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -21,6 +22,15 @@ async fn main() -> Result<()> {
         .with_env_filter(EnvFilter::from_default_env())
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
+
+    tokio::spawn(async {
+        let mut timer = Timer::new(5000);
+        loop {
+            timer.await;
+            trace!("heartbeat: running");
+            timer = Timer::new(5000);
+        }
+    });
 
     let addr = "127.0.0.1:10369";
     let listener = TcpListener::bind(addr).await?;

@@ -28,7 +28,6 @@ use tokio::{
     sync::oneshot,
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
-use tracing::debug;
 
 use crate::transport::*;
 
@@ -59,8 +58,8 @@ where
         })
     }
 
+    #[tracing::instrument(skip(self), level = "debug")]
     pub async fn send(&mut self, p: Packet) -> Result<()> {
-        debug!("Sending packet {p:?}");
         let json = serde_json::to_string(&p).context("failed to serialize packet")?;
         self.sink
             .send(Message::Text(json))

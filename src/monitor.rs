@@ -8,7 +8,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::oneshot,
 };
-use tracing::{info, debug, warn};
+use tracing::{info, debug, warn, trace};
 
 use crate::{
     bridge::Dispatcher,
@@ -361,6 +361,7 @@ where
     pub async fn run(&mut self) -> Result<()> {
         info!("Starting dispatcher.");
         loop {
+            trace!("heartbeat: polling");
             // TODO: refactor this
             // check if we need to propagate a request
             let msg = tokio::select! {
@@ -371,7 +372,7 @@ where
                             self.dispatcher.send(
                                 Packet::new(Stage::Request(Request::RequestUpscale {}), 0)
                             ).await?;
-                            if let Ok(_) = sender.send(()) {
+                            if let Err(_) = sender.send(()) {
                                 warn!("Error sending confirmation of upscale request to cgroup");
                             };
                         },
