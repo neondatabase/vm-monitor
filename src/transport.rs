@@ -35,7 +35,7 @@ impl Packet {
 pub enum Stage {
     Request(Request),
     Response(Response), // Maybe make this option<response> to signal cancellation
-    Done {}, // Because of the way go serializes struct{}
+    Done {},            // Because of the way go serializes struct{}
 }
 
 #[derive(Serialize, Deserialize, Debug)]

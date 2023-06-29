@@ -2,11 +2,11 @@ use anyhow::Result;
 use cfg_if::cfg_if;
 use clap::Parser;
 use tokio::net::TcpListener;
-use tracing::{info, error, trace};
+use tracing::{error, info, trace};
 use tracing_subscriber::EnvFilter;
 use vm_monitor::monitor::Monitor;
-use vm_monitor::Args;
 use vm_monitor::timer::Timer;
+use vm_monitor::Args;
 
 #[tokio::main]
 async fn main() -> Result<()> {

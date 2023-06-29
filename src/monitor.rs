@@ -342,10 +342,7 @@ where
                         .await?;
                     rx.await?;
                     info!("Confirmed receipt of requested upscale by cgroup manager");
-                    Ok(Some(Packet::new(
-                        Stage::Done {},
-                        0, // FIXME
-                    )))
+                    Ok(Some(Packet::new(Stage::Done {}, id)))
                 }
                 Response::ResourceConfirmation {} => {
                     unreachable!("Informant should never receive a Response::ResourceConfirmation")

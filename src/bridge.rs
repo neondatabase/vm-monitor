@@ -28,13 +28,14 @@ use tokio::{
     sync::oneshot,
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+use tracing::debug;
 
 use crate::transport::*;
 
 #[derive(Debug)]
 pub struct Dispatcher<S> {
     pub(crate) source: SplitStream<WebSocketStream<S>>,
-    pub(crate) sink: SplitSink<WebSocketStream<S>, Message>,
+    sink: SplitSink<WebSocketStream<S>, Message>,
 
     pub(crate) notify_upscale_events: Sender<(Resources, oneshot::Sender<()>)>,
     pub(crate) request_upscale_events: Receiver<oneshot::Sender<()>>, // TODO: if needed, make state some arc mutex thing or an atomic
@@ -58,8 +59,11 @@ where
         })
     }
 
+    /// Mainly here so we only send actual data. Otherwise, it would be easy to
+    /// accidentally serialize something else and send it.
     #[tracing::instrument(skip(self), level = "debug")]
     pub async fn send(&mut self, p: Packet) -> Result<()> {
+        debug!("Sending packet: {p:?}");
         let json = serde_json::to_string(&p).context("failed to serialize packet")?;
         self.sink
             .send(Message::Text(json))
