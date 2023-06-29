@@ -25,7 +25,7 @@ impl Packet {
 /// 1. One party sends the other a `Packet` containing a `Request`
 /// 2. The other party performs some action to generate a `Response`, which
 ///    it sends back.
-/// 3. The originial sender sends back a `Done` upon receiving the response.
+/// 3. The original sender sends back a `Done` upon receiving the response.
 ///
 /// TODO: in the future more stages might be added to accomodate handling
 /// (or not handling) packets based on their sequence numbers. This will
@@ -42,7 +42,7 @@ pub enum Stage {
 #[serde(rename_all = "camelCase")]
 pub enum Request {
     // Monitor initiated
-    RequestUpscale {}, // Because of the way go serializes struct{}
+    RequestUpscale {}, // We need {} because of the way go serializes struct{}
 
     // Informant initiated
     NotifyUpscale(Resources),
@@ -56,7 +56,7 @@ pub enum Response {
     UpscaleResult(Resources),
 
     // Monitor sent
-    ResourceConfirmation {}, // Because of the way go serializes struct{}
+    ResourceConfirmation {}, // We need {} because of the way go serializes struct{}
     DownscaleResult(DownscaleStatus),
 }
 

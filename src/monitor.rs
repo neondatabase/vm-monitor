@@ -285,28 +285,26 @@ where
         }
 
         if let Some(cgroup) = &self.cgroup {
-            info!("cgroup: {}", cgroup.manager.name);
-
             let available_memory = usable_system_memory - file_cache_mem_usage;
             let new_cgroup_mem_high = cgroup.config.calculate_memory_high_value(available_memory);
             info!(
-                "Updating cgroup memory.high: target = {} MiB, total_memory = {} MiB",
+                "Updating cgroup {name} memory.high: target = {} MiB, total_memory = {} MiB",
                 mib(new_cgroup_mem_high),
-                mib(new_mem)
+                mib(new_mem),
+                name = cgroup.manager.name
             );
             let limits = MemoryLimits::new(new_cgroup_mem_high, available_memory);
             cgroup.manager.set_limits(limits)?;
         }
 
-        info!("Finished handling upscale"); // debug
+        info!("Upscale handling successful");
 
         Ok(())
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn process_packet(&mut self, packet: Packet) -> Result<Option<Packet>> {
-        let id = packet.id;
-        match packet.stage {
+    pub async fn process_packet(&mut self, Packet { id, stage }: Packet) -> Result<Option<Packet>> {
+        match stage {
             Stage::Request(req) => match req {
                 Request::RequestUpscale {} => {
                     unreachable!("Informant should never send a Request::RequestUpscale")
@@ -360,11 +358,6 @@ where
     pub async fn run(&mut self) -> Result<()> {
         info!("Starting dispatcher.");
         loop {
-            trace!(
-                "heartbeat: polling, events in upscale channel: {}, receivers: {}",
-                self.dispatcher.notify_upscale_events.len(),
-                self.dispatcher.notify_upscale_events.receiver_count()
-            );
             // TODO: refactor this
             // check if we need to propagate a request
             let msg = tokio::select! {

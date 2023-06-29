@@ -61,7 +61,7 @@ where
 
     /// Mainly here so we only send actual data. Otherwise, it would be easy to
     /// accidentally serialize something else and send it.
-    #[tracing::instrument(skip(self), level = "debug")]
+    #[tracing::instrument(skip(self))]
     pub async fn send(&mut self, p: Packet) -> Result<()> {
         debug!("Sending packet: {p:?}");
         let json = serde_json::to_string(&p).context("failed to serialize packet")?;
