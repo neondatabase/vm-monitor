@@ -104,7 +104,7 @@ impl Manager {
 
         let cgroup = Cgroup::load(hierarchies::auto(), &name);
 
-        info!("creating file watcher for memory.high events");
+        info!(action = "creating file watcher for memory.high events");
 
         // Set up a watcher that notifies on changes to memory.events
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
@@ -140,10 +140,10 @@ impl Manager {
                     _ = future::ready(()) => {
                         info!(
                             wait = min_wait,
-                            "respecting minimum wait of {min_wait:?} ms before restarting memory.events listener",
+                            action = "respecting minimum wait of {min_wait:?} ms before restarting memory.events listener",
                         );
                         (&mut waiter).await;
-                        info!("restarting memory.events listener")
+                        info!(action = "restarting memory.events listener")
                     }
                 };
 
@@ -289,7 +289,7 @@ impl Manager {
 
     pub fn set_limits(&self, limits: &MemoryLimits) -> Result<()> {
         let _ = self.memory_update_lock.lock();
-        info!(limits.high, limits.max, "writing new memory limits",);
+        info!(limits.high, limits.max, action = "writing new memory limits",);
         Ok(self
             .memory()
             .tee("failed to get memory subsystem while setting memory limits")?

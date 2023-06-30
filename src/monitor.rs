@@ -87,7 +87,7 @@ where
         // allocated to the file cache is appropriately taken into account when we decide the cgroup's
         // memory limits.
         if let Some(connstr) = args.file_cache_conn_str {
-            info!("initializing file cache.");
+            info!(action = "initializing file cache");
             let config: FileCacheConfig = Default::default();
             if !config.in_memory {
                 panic!("file cache not in-memory implemented")
@@ -106,7 +106,7 @@ where
             info!(
                 initial = mib(size),
                 new = mib(new_size),
-                "setting initial file cache size",
+                action = "setting initial file cache size",
             );
 
             // note: even if size == new_size, we want to explicitly set it, just
@@ -121,13 +121,13 @@ where
         }
 
         if let Some(name) = args.cgroup {
-            info!("creating manager");
+            info!(action = "creating manager");
             let manager = Manager::new(name)
                 .await
                 .tee("failed to create new manager")?;
             let config = Default::default();
 
-            info!("creating cgroup state");
+            info!(action = "creating cgroup state");
             let mut cgroup_state =
                 CgroupState::new(manager, config, notified_recv, requesting_send);
 
@@ -159,7 +159,7 @@ where
     /// Attempt to downscale filecache + cgroup
     #[tracing::instrument(skip(self))]
     pub async fn try_downscale(&self, target: Resources) -> Result<DownscaleStatus> {
-        info!(?target, "attempting to downscale");
+        info!(?target, action = "attempting to downscale");
 
         // Nothing to adjust
         if self.cgroup.is_none() && self.filecache.is_none() {
@@ -197,7 +197,7 @@ where
                     mib(cgroup.config.memory_high_buffer_bytes)
                 );
 
-                info!(status, "discontinuing downscale");
+                info!(status, action = "discontinuing downscale");
 
                 return Ok(DownscaleStatus::new(false, status));
             }
@@ -255,7 +255,7 @@ where
     /// Handle new resources
     #[tracing::instrument(skip(self))]
     pub async fn handle_upscale(&self, resources: Resources) -> Result<()> {
-        info!(?resources, "handling agent-granted upscale");
+        info!(?resources, action = "handling agent-granted upscale");
 
         if self.filecache.is_none() && self.cgroup.is_none() {
             info!("no action needed for upscale (no cgroup or file cache enabled)");
@@ -276,7 +276,7 @@ where
             info!(
                 target = mib(expected_usage),
                 total = mib(new_mem),
-                "Updating file cache size",
+                action = "npdating file cache size",
             );
 
             let actual_usage = file_cache
@@ -286,7 +286,7 @@ where
 
             if actual_usage != expected_usage {
                 warn!(
-                    "File cache was set to a different size that we wanted: target = {} Mib, actual= {} Mib",
+                    "file cache was set to a different size that we wanted: target = {} Mib, actual= {} Mib",
                     mib(expected_usage),
                     mib(actual_usage)
                 )
@@ -301,7 +301,7 @@ where
                 target = mib(new_cgroup_mem_high),
                 total = mib(new_mem),
                 name = cgroup.manager.name,
-                "Updating cgroup memory.high",
+                action = "updating cgroup memory.high",
             );
             let limits = MemoryLimits::new(new_cgroup_mem_high, available_memory);
             cgroup
@@ -379,7 +379,7 @@ where
     // TODO: don't propagate errors, probably just warn!?
     #[tracing::instrument(skip(self))]
     pub async fn run(&mut self) -> Result<()> {
-        info!("starting dispatcher.");
+        info!(action = "starting dispatcher");
         loop {
             // TODO: refactor this
             // check if we need to propagate a request
@@ -387,7 +387,7 @@ where
                 sender = self.dispatcher.request_upscale_events.recv() => {
                     match sender {
                         Ok(sender) => {
-                            info!("cgroup asking for upscale. Forwarding request.");
+                            info!("cgroup asking for upscale; forwarding request");
                             self.dispatcher
                                 .send(Packet::new(Stage::Request(Request::RequestUpscale {}), 0))
                                 .await

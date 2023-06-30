@@ -4,7 +4,7 @@ use crate::LogContext;
 use anyhow::{bail, Result};
 use tokio_postgres::Client;
 use tokio_postgres::NoTls;
-use tracing::{info, error};
+use tracing::{error, info};
 
 #[derive(Debug)]
 pub struct FileCacheState {
@@ -199,7 +199,7 @@ impl FileCacheState {
         info!(
             size = num_mb,
             max = max_mb,
-            "updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}",
+            action = format!("updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}"),
         );
 
         self.client

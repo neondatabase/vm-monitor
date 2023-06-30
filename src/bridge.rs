@@ -66,7 +66,7 @@ where
     /// accidentally serialize something else and send it.
     #[tracing::instrument(skip(self))]
     pub async fn send(&mut self, p: Packet) -> Result<()> {
-        debug!(packet = ?p, "sending packet");
+        debug!(packet = ?p, action = "sending packet");
         let json = serde_json::to_string(&p).tee("failed to serialize packet")?;
         Ok(self
             .sink
