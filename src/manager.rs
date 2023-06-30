@@ -11,7 +11,7 @@ use std::{
     },
 };
 
-use anyhow::{anyhow, bail, Context, Error, Result};
+use anyhow::{anyhow, bail, Error, Result};
 use async_std::channel::{self, Receiver, TryRecvError};
 use cgroups_rs::{
     cgroup::{Cgroup, UNIFIED_MOUNTPOINT},
@@ -26,7 +26,7 @@ use inotify::{Inotify, WatchMask};
 use notify::Event;
 use tracing::{info, warn};
 
-use crate::timer::Timer;
+use crate::{timer::Timer, LogContext};
 
 #[derive(Debug)]
 pub struct Manager {
@@ -80,6 +80,7 @@ impl Display for MemoryEvent {
     }
 }
 
+#[derive(Debug)]
 pub struct MemoryLimits {
     high: u64,
     max: u64,
@@ -103,15 +104,15 @@ impl Manager {
 
         let cgroup = Cgroup::load(hierarchies::auto(), &name);
 
-        info!("Creating file watcher for memory.high events");
+        info!("creating file watcher for memory.high events");
 
         // Set up a watcher that notifies on changes to memory.events
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
-        let inotify = Inotify::init().context("Failed to initialize file watcher")?;
+        let inotify = Inotify::init().tee("failed to initialize file watcher")?;
         inotify
             .watches()
             .add(&path, WatchMask::MODIFY)
-            .with_context(|| format!("Failed to start watching {path}"))?;
+            .with_tee(|| format!("failed to start watching {path}"))?;
 
         // These are effectively just signals
         let (event_tx, event_rx) = channel::bounded(1);
@@ -137,9 +138,9 @@ impl Manager {
                     biased;
                     _ = &mut waiter => (),
                     _ = future::ready(()) => {
-                        info!("Respecting minimum wait of {min_wait:?} ms before restarting memory.events listener");
+                        info!("respecting minimum wait of {min_wait:?} ms before restarting memory.events listener");
                         (&mut waiter).await;
-                        info!("Restarting memory.events listener")
+                        info!("restarting memory.events listener")
                     }
                 };
 
@@ -148,7 +149,7 @@ impl Manager {
                 // Read memory.events and send an update down the channel if the number of high events
                 // has increased
                 if let Some(val) = events.next().await {
-                    info!("Got memory high event");
+                    info!("got memory high event");
                     match val {
                         Ok(_) => {
                             if let Ok(high) = Self::get_event_count(&name_clone, MemoryEvent::High)
@@ -157,7 +158,7 @@ impl Manager {
                                     event_tx.send(high).await.unwrap()
                                 }
                             } else {
-                                warn!("Failed to read high events count from memory.events")
+                                warn!("failed to read high events count from memory.events")
                             }
                         }
                         Err(error) => {
@@ -172,8 +173,8 @@ impl Manager {
         // Log out an initial memory.events summary
         // TODO: change this to general memory information in the future?
         let high = Self::get_event_count(&name, MemoryEvent::High)
-            .context("Failed to extract number of memory high events from memory.events")?;
-        info!("The current number of memory high events: {high}");
+            .tee("failed to extract number of memory high events from memory.events")?;
+        info!("the current number of memory high events: {high}");
 
         // Ignore the first set of events. We don't actually want to be notified
         // on startup since some processes might already be running.
@@ -181,7 +182,7 @@ impl Manager {
         // startup, so we use try_recv
         if let Err(TryRecvError::Closed) = event_rx.try_recv() {
             bail!(
-                "Failed to clear initial memory.high event count due to event channel being closed"
+                "failed to clear initial memory.high event count due to event channel being closed"
             )
         };
 
@@ -203,18 +204,17 @@ impl Manager {
             .filter_map(|s| s.split_once(' '))
             .find(|(e, _)| *e == event.to_string())
             .map(|(_, count)| count.parse::<u64>())
-            .ok_or(anyhow!(
-                "failed to find entry for memory high events in {path}"
-            ))?
-            .context("Failed to parse memory.high as u64")?)
+            .ok_or(anyhow!("error getting memory.high event count"))
+            .with_tee(|| format!("failed to find entry for memory high events in {path}"))?
+            .tee("failed to parse memory.high as u64")?)
     }
 
     pub fn state(&self) -> Result<FreezerState> {
         Ok(self
             .freezer()
-            .context("Failed to get freezer subsystem while attempting to get freezer state")?
+            .tee("failed to get freezer subsystem while attempting to get freezer state")?
             .state()
-            .context("Failed to get freezer state")?)
+            .tee("failed to get freezer state")?)
     }
 
     fn freezer(&self) -> Result<&FreezerController> {
@@ -233,15 +233,17 @@ impl Manager {
     pub fn freeze(&self) -> Result<()> {
         Ok(self
             .freezer()
-            .context("Failed to get freezer subsystem while attempting to freeze")?
-            .freeze()?)
+            .tee("failed to get freezer subsystem")?
+            .freeze()
+            .tee("failed to freeze")?)
     }
 
     pub fn thaw(&self) -> Result<()> {
         Ok(self
             .freezer()
-            .context("Failed to get freezer subsystem while attempting to thaw")?
-            .thaw()?)
+            .tee("failed to get freezer subsystem")?
+            .thaw()
+            .tee("failed to thaw")?)
     }
 
     fn memory(&self) -> Result<&MemController> {
@@ -258,32 +260,36 @@ impl Manager {
     }
 
     pub fn current_memory_usage(&self) -> Result<u64> {
-        Ok(self.memory()?.memory_stat().usage_in_bytes)
+        Ok(self
+            .memory()
+            .tee("failed to get memory subsystem")?
+            .memory_stat()
+            .usage_in_bytes)
     }
 
     pub fn set_high_bytes(&self, bytes: u64) -> Result<()> {
         let _ = self.memory_update_lock.lock();
         Ok(self
             .memory()
-            .context("Failed to get memory subsystem while setting memory.high")?
+            .tee("failed to get memory subsystem")?
             .set_mem(cgroups_rs::memory::SetMemory {
                 low: None,
                 high: Some(MaxValue::Value(bytes.max(i64::MAX as u64) as i64)),
                 min: None,
                 max: None,
             })
-            .context("Failed to set memory.high")?)
+            .tee("failed to set memory.high")?)
     }
 
-    pub fn set_limits(&self, limits: MemoryLimits) -> Result<()> {
+    pub fn set_limits(&self, limits: &MemoryLimits) -> Result<()> {
         let _ = self.memory_update_lock.lock();
         info!(
-            "Writing new memory limits: high => {}, max => {}",
+            "writing new memory limits: high => {}, max => {}",
             limits.high, limits.max
         );
         Ok(self
             .memory()
-            .context("Failed to get memory subsystem while setting memory limits")?
+            .tee("failed to get memory subsystem while setting memory limits")?
             .set_mem(cgroups_rs::memory::SetMemory {
                 min: None,
                 low: None,
@@ -292,17 +298,17 @@ impl Manager {
                 )),
                 max: Some(MaxValue::Value(u64::max(limits.max, i64::MAX as u64) as i64)),
             })
-            .context("Failed to set memory limits")?)
+            .tee("failed to set memory limits")?)
     }
 
     pub fn get_high_bytes(&self) -> Result<u64> {
         let _ = self.memory_update_lock.lock();
         let high = self
             .memory()
-            .context("Failed to get memory subsystem while getting memory statistics")?
+            .tee("failed to get memory subsystem while getting memory statistics")?
             .get_mem()
             .map(|mem| mem.high)
-            .context("Failed to get memory statistics from subsystem")?;
+            .tee("failed to get memory statistics from subsystem")?;
         match high {
             Some(MaxValue::Max) => Ok(i64::MAX as u64),
             Some(MaxValue::Value(high)) => Ok(high as u64),

@@ -8,7 +8,6 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.71"
 async-std = { version = "1.12.0", features = ["async-channel"]}
-cfg-if = "1.0.0"
 cgroups-rs = "0.3.2"
 clap = { version = "4.3.4", features = ["derive"] }
 futures-util = "0.3.28"
@@ -18,9 +17,10 @@ postgres = "0.19.5"
 serde = { version = "1.0.164", features = ["derive"] }
 serde_json = "1.0.96"
 sysinfo = "0.29.2"
+tap = "1.0.1"
 tokio = { version = "1.28.2", features = ["macros", "rt-multi-thread"]}
 tokio-postgres = "0.7.8"
 tokio-tungstenite = "0.19.0"
 tracing = { version = "0.1.37", features = ["log-always"]}
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.17", features = ["env-filter", "json"] }
 

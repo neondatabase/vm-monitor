@@ -1,6 +1,7 @@
 // TODO: should all fields be pub(crate)?
 
-use anyhow::{bail, Context, Result};
+use crate::LogContext;
+use anyhow::{bail, Result};
 use tokio_postgres::Client;
 use tokio_postgres::NoTls;
 use tracing::info;
@@ -140,7 +141,7 @@ impl FileCacheState {
     pub async fn new(conn_str: &str, config: FileCacheConfig) -> Result<Self> {
         let (client, conn) = tokio_postgres::connect(conn_str, NoTls)
             .await
-            .context("Failed to connect to pg client")?;
+            .tee("failed to connect to pg client")?;
 
         tokio::spawn(async move {
             if let Err(e) = conn.await {
@@ -148,7 +149,7 @@ impl FileCacheState {
             }
         });
 
-        config.validate().context("File cache config is invalid")?;
+        config.validate().tee("file cache config is invalid")?;
         Ok(Self { client, config })
     }
 
@@ -160,12 +161,12 @@ impl FileCacheState {
                 &[],
             )
             .await
-            .context("Failed to query pg for file cache size")?
+            .tee("failed to query pg for file cache size")?
             // pg_size_bytes returns a bigint which is the same as an i64.
             .try_get::<_, i64>(0)
             // Since the size of the table is not negative, the cast is sound.
             .map(|bytes| bytes as u64)
-            .context("Failed to extract file cache size from query result")?)
+            .tee("failed to extract file cache size from query result")?)
     }
 
     pub async fn set_file_cache_size(&self, num_bytes: u64) -> Result<u64> {
@@ -176,10 +177,10 @@ impl FileCacheState {
                 &[],
             )
             .await
-            .context("Failed to query pg for max file cache size")?
+            .tee("failed to query pg for max file cache size")?
             .try_get::<_, i64>(0)
             .map(|bytes| bytes as u64)
-            .context("Failed to extract amx file cache size form query result")?;
+            .tee("failed to extract amx file cache size form query result")?;
 
         let mut num_mb = num_bytes / (1 << 20);
         let max_mb = max_bytes / (1 << 20);
@@ -194,7 +195,7 @@ impl FileCacheState {
             ""
         };
 
-        info!("Updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}",);
+        info!("updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}",);
 
         self.client
             .execute(
@@ -202,12 +203,12 @@ impl FileCacheState {
                 &[],
             )
             .await
-            .context("Failed to change file cache size limit")?;
+            .tee("failed to change file cache size limit")?;
 
         self.client
             .execute("SELECT pg_reload_conf();", &[])
             .await
-            .context("Failed to reload config")?;
+            .tee("failed to reload config")?;
 
         Ok(num_mb * (1 << 20))
     }

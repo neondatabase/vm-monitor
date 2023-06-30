@@ -17,7 +17,7 @@
 ///
 /// The monitor and informant are connected via websocket on port 10369
 ///
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_std::channel::{Receiver, Sender};
 use futures_util::{
     stream::{SplitSink, SplitStream},
@@ -30,7 +30,7 @@ use tokio::{
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tracing::debug;
 
-use crate::transport::*;
+use crate::{transport::*, LogContext};
 
 #[derive(Debug)]
 pub struct Dispatcher<S> {
@@ -50,7 +50,10 @@ where
         notify_upscale_events: Sender<(Resources, oneshot::Sender<()>)>,
         request_upscale_events: Receiver<oneshot::Sender<()>>,
     ) -> Result<Self> {
-        let (sink, source) = accept_async(stream).await?.split();
+        let (sink, source) = accept_async(stream)
+            .await
+            .tee("failed to connect to stream")?
+            .split();
         Ok(Self {
             sink,
             source,
@@ -63,11 +66,12 @@ where
     /// accidentally serialize something else and send it.
     #[tracing::instrument(skip(self))]
     pub async fn send(&mut self, p: Packet) -> Result<()> {
-        debug!("Sending packet: {p:?}");
-        let json = serde_json::to_string(&p).context("failed to serialize packet")?;
-        self.sink
+        debug!(packet = ?p, "sending packet");
+        let json = serde_json::to_string(&p).tee("failed to serialize packet")?;
+        Ok(self
+            .sink
             .send(Message::Text(json))
             .await
-            .map_err(|e| e.into()) // Sink returns some weird error that we need to convert
+            .tee("stream error sending message")?)
     }
 }

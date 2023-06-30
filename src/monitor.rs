@@ -1,14 +1,14 @@
 use std::sync::Arc;
 use std::{fmt::Debug, mem};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use async_std::channel;
 use futures_util::StreamExt;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     sync::oneshot,
 };
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, warn};
 
 use crate::{
     bridge::Dispatcher,
@@ -18,7 +18,7 @@ use crate::{
     manager::{Manager, MemoryLimits},
     mib,
     transport::{DownscaleStatus, Packet, Request, Resources, Response, Stage},
-    Args, MiB,
+    Args, LogContext, MiB,
 };
 
 #[derive(Debug)]
@@ -69,7 +69,9 @@ where
         let (notified_send, notified_recv) = channel::unbounded();
         let (requesting_send, requesting_recv) = channel::unbounded();
 
-        let dispatcher = Dispatcher::new(stream, notified_send, requesting_recv).await?;
+        let dispatcher = Dispatcher::new(stream, notified_send, requesting_recv)
+            .await
+            .tee("error creating new dispatcher")?;
 
         let mut state = Monitor {
             config,
@@ -85,7 +87,7 @@ where
         // allocated to the file cache is appropriately taken into account when we decide the cgroup's
         // memory limits.
         if let Some(connstr) = args.file_cache_conn_str {
-            info!("Initializing file cache.");
+            info!("initializing file cache.");
             let config: FileCacheConfig = Default::default();
             if !config.in_memory {
                 panic!("file cache not in-memory implemented")
@@ -93,16 +95,16 @@ where
 
             let file_cache = FileCacheState::new(&connstr, config)
                 .await
-                .context("Failed to create file cache")?;
+                .tee("failed to create file cache")?;
 
             let size = file_cache
                 .get_file_cache_size()
                 .await
-                .context("Error getting file cache size")?;
+                .tee("error getting file cache size")?;
 
             let new_size = file_cache.config.calculate_cache_size(mem);
             info!(
-                "Initial file cache size: {}, setting to {}",
+                "initial file cache size: {}, setting to {}",
                 mib(size),
                 mib(new_size)
             );
@@ -112,26 +114,29 @@ where
             let actual_size = file_cache
                 .set_file_cache_size(new_size)
                 .await
-                .context("Failed to set file cache size")?;
+                .tee("failed to set file cache size")?;
             file_cache_reserved_bytes = actual_size;
 
             state.filecache = Some(file_cache);
         }
 
         if let Some(name) = args.cgroup {
-            info!("Creating manager");
+            info!("creating manager");
             let manager = Manager::new(name)
                 .await
-                .context("Failed to create new manager")?;
+                .tee("failed to create new manager")?;
             let config = Default::default();
 
-            info!("Creating cgroup state");
+            info!("creating cgroup state");
             let mut cgroup_state =
                 CgroupState::new(manager, config, notified_recv, requesting_send);
 
             let available = mem - file_cache_reserved_bytes;
 
-            cgroup_state.set_memory_limits(available).await?;
+            cgroup_state
+                .set_memory_limits(available)
+                .await
+                .tee("failed to set cgroup memory limits")?;
 
             let cgroup_state = Arc::new(cgroup_state);
             let clone = Arc::clone(&cgroup_state);
@@ -154,11 +159,11 @@ where
     /// Attempt to downscale filecache + cgroup
     #[tracing::instrument(skip(self))]
     pub async fn try_downscale(&self, target: Resources) -> Result<DownscaleStatus> {
-        info!("Attempting to downscale to {target:?}");
+        info!("attempting to downscale to {target:?}");
 
         // Nothing to adjust
         if self.cgroup.is_none() && self.filecache.is_none() {
-            info!("No action needed for downscale (no cgroup or file cache enabled)");
+            info!("no action needed for downscale (no cgroup or file cache enabled)");
             return Ok(DownscaleStatus::new(
                 true,
                 "monitor is not managing cgroup or file cache".to_string(),
@@ -181,18 +186,18 @@ where
 
             let current = cgroup
                 .get_current_memory()
-                .context("Failed to fetch cgroup memory")?;
+                .tee("failed to fetch cgroup memory")?;
 
             if new_cgroup_mem_high < current + cgroup.config.memory_high_buffer_bytes {
                 let status = format!(
                     "{}: {} MiB (new high) < {} (current usage) + {} (buffer)",
-                    "Calculated memory.high too low",
+                    "calculated memory.high too low",
                     mib(new_cgroup_mem_high),
                     mib(current),
                     mib(cgroup.config.memory_high_buffer_bytes)
                 );
 
-                info!("Discontinuing downscale: {status}");
+                info!("discontinuing downscale: {status}");
 
                 return Ok(DownscaleStatus::new(false, status));
             }
@@ -209,9 +214,9 @@ where
             let actual_usage = file_cache
                 .set_file_cache_size(expected_file_cache_mem_usage)
                 .await
-                .context("failed to set file cache size")?;
+                .tee("failed to set file cache size")?;
             file_cache_mem_usage = actual_usage;
-            status.push(format!("Set file cache size to {} MiB", mib(actual_usage)));
+            status.push(format!("set file cache size to {} MiB", mib(actual_usage)));
         }
 
         if let Some(cgroup) = &self.cgroup {
@@ -229,18 +234,18 @@ where
             );
             cgroup
                 .manager
-                .set_limits(limits)
-                .context("Failed to set cgroup memory limits")?;
+                .set_limits(&limits)
+                .tee("failed to set cgroup memory limits")?;
 
             status.push(format!(
-                "Set cgroup memory.high to {} MiB, of new max {} MiB",
+                "set cgroup memory.high to {} MiB, of new max {} MiB",
                 mib(new_cgroup_mem_high),
                 mib(available_memory)
             ));
         }
 
         // TODO: make this status thing less jank
-        info!("Downscale successful: {}", status.join("; "));
+        info!("downscale successful: {}", status.join("; "));
 
         Ok(DownscaleStatus::new(true, status.join("; ")))
     }
@@ -248,10 +253,10 @@ where
     /// Handle new resources
     #[tracing::instrument(skip(self))]
     pub async fn handle_upscale(&self, resources: Resources) -> Result<()> {
-        info!("Handling agent-granted upscale to {resources:?}");
+        info!("handling agent-granted upscale to {resources:?}");
 
         if self.filecache.is_none() && self.cgroup.is_none() {
-            info!("No action needed for upscale (no cgroup or file cache enabled)");
+            info!("no action needed for upscale (no cgroup or file cache enabled)");
             return Ok(());
         }
 
@@ -262,7 +267,7 @@ where
         let mut file_cache_mem_usage = 0;
         if let Some(file_cache) = &self.filecache {
             if !file_cache.config.in_memory {
-                panic!("File cache not in-memory unimplemented");
+                panic!("file cache not in-memory unimplemented");
             }
 
             let expected_usage = file_cache.config.calculate_cache_size(usable_system_memory);
@@ -272,7 +277,10 @@ where
                 mib(new_mem)
             );
 
-            let actual_usage = file_cache.set_file_cache_size(expected_usage).await?;
+            let actual_usage = file_cache
+                .set_file_cache_size(expected_usage)
+                .await
+                .tee("failed to set file cache size")?;
 
             if actual_usage != expected_usage {
                 warn!(
@@ -294,10 +302,13 @@ where
                 name = cgroup.manager.name
             );
             let limits = MemoryLimits::new(new_cgroup_mem_high, available_memory);
-            cgroup.manager.set_limits(limits)?;
+            cgroup
+                .manager
+                .set_limits(&limits)
+                .tee("failed to set file cache size")?;
         }
 
-        info!("Upscale handling successful");
+        info!("upscale handling successful");
 
         Ok(())
     }
@@ -307,17 +318,21 @@ where
         match stage {
             Stage::Request(req) => match req {
                 Request::RequestUpscale {} => {
-                    unreachable!("Informant should never send a Request::RequestUpscale")
+                    unreachable!("informant should never send a Request::RequestUpscale")
                 }
                 Request::NotifyUpscale(resources) => {
                     let (tx, rx) = oneshot::channel();
-                    self.handle_upscale(resources).await?;
+                    self.handle_upscale(resources)
+                        .await
+                        .tee("failed to handle upscale")?;
                     self.dispatcher
                         .notify_upscale_events
                         .send((resources, tx))
-                        .await?;
-                    rx.await?;
-                    info!("Confirmed receipt of upscale by cgroup manager");
+                        .await
+                        .tee("failed to notify cgroup of upscale event")?;
+                    rx.await
+                        .tee("failed to confirm receipt of upscale by cgroup manager")?;
+                    info!("confirmed receipt of upscale by cgroup manager");
                     Ok(Some(Packet::new(
                         Stage::Response(Response::ResourceConfirmation {}),
                         id,
@@ -325,7 +340,9 @@ where
                 }
                 Request::TryDownscale(resources) => Ok(Some(Packet::new(
                     Stage::Response(Response::DownscaleResult(
-                        self.try_downscale(resources).await?,
+                        self.try_downscale(resources)
+                            .await
+                            .tee("failed to downscale")?,
                     )),
                     id,
                 ))),
@@ -333,20 +350,24 @@ where
             Stage::Response(res) => match res {
                 Response::UpscaleResult(resources) => {
                     let (tx, rx) = oneshot::channel();
-                    self.handle_upscale(resources).await?;
+                    self.handle_upscale(resources)
+                        .await
+                        .tee("failed to handle upscale")?;
                     self.dispatcher
                         .notify_upscale_events
                         .send((resources, tx))
-                        .await?;
-                    rx.await?;
-                    info!("Confirmed receipt of requested upscale by cgroup manager");
+                        .await
+                        .tee("failed to notify cgroup of upscale event")?;
+                    rx.await
+                        .tee("confirmed receipt of upscale by cgroup manager")?;
+                    info!("confirmed receipt of requested upscale by cgroup manager");
                     Ok(Some(Packet::new(Stage::Done {}, id)))
                 }
                 Response::ResourceConfirmation {} => {
-                    unreachable!("Informant should never receive a Response::ResourceConfirmation")
+                    unreachable!("informant should never receive a Response::ResourceConfirmation")
                 }
                 Response::DownscaleResult(_) => {
-                    unreachable!("Informant should never receive a Response::DownscaleResult")
+                    unreachable!("informant should never receive a Response::DownscaleResult")
                 }
             },
             Stage::Done {} => Ok(None), // yay! :)
@@ -356,7 +377,7 @@ where
     // TODO: don't propagate errors, probably just warn!?
     #[tracing::instrument(skip(self))]
     pub async fn run(&mut self) -> Result<()> {
-        info!("Starting dispatcher.");
+        info!("starting dispatcher.");
         loop {
             // TODO: refactor this
             // check if we need to propagate a request
@@ -365,14 +386,15 @@ where
                     match sender {
                         Ok(sender) => {
                             info!("cgroup asking for upscale. Forwarding request.");
-                            self.dispatcher.send(
-                                Packet::new(Stage::Request(Request::RequestUpscale {}), 0)
-                            ).await?;
+                            self.dispatcher
+                                .send(Packet::new(Stage::Request(Request::RequestUpscale {}), 0))
+                                .await
+                                .tee("failed to send packet")?;
                             if let Err(_) = sender.send(()) {
-                                warn!("Error sending confirmation of upscale request to cgroup");
+                                warn!("error sending confirmation of upscale request to cgroup");
                             };
                         },
-                        Err(e) => warn!("Error receiving upscale event: {e}")
+                        Err(e) => warn!("error receiving upscale event: {e}")
                     }
                     continue
                 }
@@ -381,7 +403,7 @@ where
                 }
             };
             if let Some(msg) = msg {
-                debug!("Received packet: {msg:?}");
+                debug!("received packet: {msg:?}");
                 // Maybe have another thread do this work? Can lead to out of order?
                 match msg {
                     Ok(msg) => {
@@ -399,14 +421,17 @@ where
                             _ => continue,
                         };
 
-                        let Some(out) = self.process_packet(packet).await? else {
+                        let Some(out) = self.process_packet(packet).await.tee("failed to process packet")? else {
                             continue
                         };
 
                         // Technically doesn't need a block, but just putting one for
                         // clarity since the borrowing in this section is tricky
                         {
-                            self.dispatcher.send(out).await?;
+                            self.dispatcher
+                                .send(out)
+                                .await
+                                .tee("failed to send packet")?;
                         }
                     }
                     Err(e) => warn!("{e}"),

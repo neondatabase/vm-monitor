@@ -3,7 +3,7 @@
 
 use std::{future, sync::Arc, time::Instant};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use async_std::channel::{Receiver, Sender, TryRecvError};
 use tokio::sync::oneshot;
 use tracing::info;
@@ -13,7 +13,7 @@ use crate::{
     mib,
     timer::Timer,
     transport::Resources,
-    MiB,
+    LogContext, MiB,
 };
 
 #[derive(Debug)]
@@ -115,27 +115,27 @@ impl CgroupState {
 
     #[tracing::instrument(skip(self))]
     pub async fn set_memory_limits(&mut self, available_memory: u64) -> Result<()> {
-        info!("Setting memory limits for cgroup {}", self.manager.name);
+        info!("setting memory limits for cgroup {}", self.manager.name);
         let new_high = self.config.calculate_memory_high_value(available_memory);
         info!(
-            "Total memory available for cgroup {} is {} MiB. Setting cgroup memory.",
+            "total memory available for cgroup {} is {} MiB. Setting cgroup memory.",
             self.manager.name,
             mib(new_high)
         );
 
         // We don't want to block here, just clear any outstanding event if there is one
         if let Err(TryRecvError::Closed) = self.manager.highs.try_recv() {
-            bail!("Failed to clear memory.high events due to channel being closed")
+            bail!("failed to clear memory.high events due to channel being closed")
         }
 
         let limits = MemoryLimits::new(new_high, available_memory);
 
         self.manager
-            .set_limits(limits)
-            .context("Failed to set cgroup memory limits")?;
+            .set_limits(&limits)
+            .tee("failed to set cgroup memory limits")?;
 
         info!(
-            "Successfully set cgroup {} memory limits",
+            "successfully set cgroup {} memory limits",
             self.manager.name
         );
         Ok(())
@@ -146,7 +146,7 @@ impl CgroupState {
         // FIXME: we should have "proper" error handling instead of just panicking. It's hard to
         // determine what the correct behavior should be if a cgroup operation fails, though.
         let state = Arc::clone(self);
-        info!("Starting main signals loop for {}", state.manager.name);
+        info!("starting main signals loop for {}", state.manager.name);
         tokio::spawn(async move {
             let mut waiting_on_upscale = false;
             let mut wait_to_increase_memory_high = Timer::new(0);
@@ -157,13 +157,13 @@ impl CgroupState {
                     // Just panic on errors for now, see FIXME
                     err = state.manager.errors.recv() => {
                         match err {
-                            Ok(err) => panic!("Error listening for cgroup signals {err}"),
-                            Err(e) => panic!("Error channel was unexpectedly closed: {e}")
+                            Ok(err) => panic!("error listening for cgroup signals {err}"),
+                            Err(e) => panic!("error channel was unexpectedly closed: {e}")
                         }
                     }
 
                     bundle = state.notify_upscale_events.recv() => {
-                        info!("Received upscale event");
+                        info!("received upscale event");
                         match bundle {
                             Ok((resources, tx)) => {
                                 info!("cgroup manager confirming upscale of {resources:?}");
@@ -187,17 +187,17 @@ impl CgroupState {
                                         waiting_on_upscale = b;
                                         wait_to_freeze = Timer::new(state.config.do_not_freeze_more_often_than_millis);
                                      },
-                                     Err(e) => panic!("Error handling memory high event {e}")
+                                     Err(e) => panic!("error handling memory high event {e}")
                                 }
                             }
                             _ = future::ready(()) => {
                                 if !waiting_on_upscale {
-                                    info!("Received memory.high event, but too soon to re-freeze. Requesting upscale.");
+                                    info!("received memory.high event, but too soon to re-freeze. Requesting upscale.");
 
                                     tokio::select! {
                                         biased;
                                         bundle = state.notify_upscale_events.recv() => {
-                                            info!("No need to request upscaling because we were already upscaled");
+                                            info!("no need to request upscaling because we were already upscaled");
                                             match bundle {
                                                 Ok((_, tx)) => {
                                                     // Report back that we're done handling the event.
@@ -211,10 +211,10 @@ impl CgroupState {
                                         }
                                         _ = future::ready(()) => {
                                             // TODO: could just unwrap
-                                            info!("Requesting upscale.");
+                                            info!("requesting upscale.");
                                             match state.request_upscale().await {
                                                 Ok(_) => {},
-                                                Err(e) => panic!("Error requesting upscale {e}")
+                                                Err(e) => panic!("error requesting upscale {e}")
                                             }
                                         }
                                     }
@@ -225,7 +225,7 @@ impl CgroupState {
                                             tokio::select! {
                                                 biased;
                                                 bundle = state.notify_upscale_events.recv() => {
-                                                    info!("No need to request upscaling because we were already upscaled");
+                                                    info!("no need to request upscaling because we were already upscaled");
                                                     match bundle {
                                                         Ok((_, tx)) => {
                                                             // Report back that we're done handling the event.
@@ -239,28 +239,28 @@ impl CgroupState {
                                                         return;
                                                     }
                                                 _ = future::ready(()) => {
-                                                    info!("Requesting upscale.");
+                                                    info!("requesting upscale.");
                                                     // TODO: could just unwrap
                                                     match state.request_upscale().await {
                                                         Ok(_) => {},
-                                                        Err(e) => panic!("Error requesting upscale {e}")
+                                                        Err(e) => panic!("error requesting upscale {e}")
                                                     }
                                                 }
                                             };
 
                                             let mem_high = match state.manager.get_high_bytes() {
                                                 Ok(high) => high,
-                                                Err(e) => panic!("Error fetching memory.high {}", e)
+                                                Err(e) => panic!("error fetching memory.high {}", e)
                                             };
 
                                             let new_high = mem_high + state.config.memory_high_increase_by_bytes;
-                                            info!("Updating memory.high from {} -> {} Mib",
+                                            info!("updating memory.high from {} -> {} Mib",
                                                   mib(mem_high),
                                                   mib(new_high)
                                             );
 
                                             if let Err(e) = state.manager.set_high_bytes(new_high) {
-                                                panic!("Error setting memory limits: {e}")
+                                                panic!("error setting memory limits: {e}")
                                             }
 
                                             wait_to_increase_memory_high = Timer::new(state.config.memory_high_increase_every_millis)
@@ -270,7 +270,7 @@ impl CgroupState {
                                         }
                                     }
 
-                                    info!("Received memory.high event, too soon to re-freeze, but increasing memory.high");
+                                    info!("received memory.high event, too soon to re-freeze, but increasing memory.high");
                                 }
                             }
                         }
@@ -286,7 +286,7 @@ impl CgroupState {
             biased;
 
             bundle = self.notify_upscale_events.recv() => {
-                info!("Skipping memory.high event because there was an upscale event");
+                info!("skipping memory.high event because there was an upscale event");
                 match bundle {
                     Ok((_, tx)) => {
                         // Report back that we're done handling the event.
@@ -303,24 +303,24 @@ impl CgroupState {
             _ = future::ready(()) => {}
         };
 
-        info!("Received memory high event. Freezing cgroup.");
+        info!("received memory high event. Freezing cgroup.");
 
         self.manager
             .freeze()
-            .with_context(|| format!("Failed to freeze cgroup {}", self.manager.name))?;
+            .with_tee(|| format!("failed to freeze cgroup {}", self.manager.name))?;
 
         let start = Instant::now();
 
         let must_thaw = Timer::new(self.config.max_upscale_wait_millis);
 
         info!(
-            "Sending request for immediate upscaling, waiting for at most {}",
+            "sending request for immediate upscaling, waiting for at most {}",
             self.config.max_upscale_wait_millis
         );
 
         self.request_upscale()
             .await
-            .context("Failed to request upscale")?;
+            .tee("failed to request upscale")?;
 
         let mut upscaled = false;
         let total_wait;
@@ -328,7 +328,7 @@ impl CgroupState {
         tokio::select! {
             bundle = self.notify_upscale_events.recv() => {
                 total_wait = start.elapsed();
-                info!("Received notification that upscale occured after {total_wait:?}. Thawing cgroup.");
+                info!("received notification that upscale occured after {total_wait:?}. Thawing cgroup.");
                 match bundle {
                     Ok((_, tx)) => {
                         // Report back that we're done handling the event.
@@ -343,17 +343,17 @@ impl CgroupState {
             }
             _ = must_thaw => {
                 total_wait = start.elapsed();
-                info!("Time out after {total_wait:?} waiting for upscale. Thawing cgroup.")
+                info!("time out after {total_wait:?} waiting for upscale. Thawing cgroup.")
             }
         };
 
         self.manager
             .thaw()
-            .with_context(|| format!("Failed to thaw cgroup {}", self.manager.name))?;
+            .with_tee(|| format!("failed to thaw cgroup {}", self.manager.name))?;
 
         // We don't want to block here, just clear any outstanding event if there is one
         if let Err(TryRecvError::Closed) = self.manager.highs.try_recv() {
-            bail!("Failed to clear memory.high events due to channel being closed")
+            bail!("failed to clear memory.high events due to channel being closed")
         }
 
         return Ok(!upscaled);
@@ -362,8 +362,12 @@ impl CgroupState {
     #[tracing::instrument(skip(self))]
     pub async fn request_upscale(&self) -> Result<()> {
         let (tx, rx) = oneshot::channel();
-        self.request_upscale_events.send(tx).await?;
-        rx.await?;
+        self.request_upscale_events
+            .send(tx)
+            .await
+            .tee("failed to send upscale request across channel")?;
+        rx.await
+            .tee("failed to read confirmation of receipt of upscale request")?;
         Ok(())
     }
 }

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use cfg_if::cfg_if;
 use clap::Parser;
 use tokio::net::TcpListener;
 use tracing::{error, info};
@@ -9,15 +8,8 @@ use vm_monitor::Args;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let subscriber = tracing_subscriber::fmt::Subscriber::builder();
-    cfg_if! {
-        if #[cfg(debug_assertions)] {
-            let subscriber = subscriber.pretty();
-        } else {
-            let subscriber = subscriber.json();
-        }
-    };
-    let subscriber = subscriber
+    let subscriber = tracing_subscriber::fmt::Subscriber::builder()
+        .json()
         .with_env_filter(EnvFilter::from_default_env())
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
