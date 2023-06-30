@@ -1,6 +1,3 @@
-// TODO: standardize using 'memory high event' or 'memory.high event'
-// TODO: logging; make sure to assess how control flow like ? affects it.
-
 use std::{future, sync::Arc, time::Instant};
 
 use anyhow::{bail, Result};
@@ -184,7 +181,7 @@ impl CgroupState {
                                         waiting_on_upscale = b;
                                         wait_to_freeze = Timer::new(state.config.do_not_freeze_more_often_than_millis);
                                      },
-                                     Err(e) => panic!("error handling memory high event {e}")
+                                     Err(e) => panic!("error handling memory.high event {e}")
                                 }
                             }
                             _ = future::ready(()) => {
@@ -300,7 +297,7 @@ impl CgroupState {
             _ = future::ready(()) => {}
         };
 
-        info!("received memory high event. Freezing cgroup.");
+        info!("received memory.high event. Freezing cgroup.");
 
         self.manager
             .freeze()

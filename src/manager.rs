@@ -30,7 +30,7 @@ use crate::{timer::Timer, LogContext};
 
 #[derive(Debug)]
 pub struct Manager {
-    /// Receives updates on memory high events
+    /// Receives updates on memory.high events
     ///
     /// Note: this channel's methods should be cancellation safe, refer to the
     /// async-std source code.
@@ -152,7 +152,7 @@ impl Manager {
                 // Read memory.events and send an update down the channel if the number of high events
                 // has increased
                 if let Some(val) = events.next().await {
-                    info!("got memory high event");
+                    info!("got memory.high event");
                     match val {
                         Ok(_) => {
                             if let Ok(high) = Self::get_event_count(&name_clone, MemoryEvent::High)
@@ -176,10 +176,10 @@ impl Manager {
         // Log out an initial memory.events summary
         // TODO: change this to general memory information in the future?
         let high = Self::get_event_count(&name, MemoryEvent::High)
-            .tee("failed to extract number of memory high events from memory.events")?;
+            .tee("failed to extract number of memory.high events from memory.events")?;
         info!(
             events = high,
-            "the current number of memory high events: {high}"
+            "the current number of memory.high events: {high}"
         );
 
         // Ignore the first set of events. We don't actually want to be notified
@@ -211,7 +211,7 @@ impl Manager {
             .find(|(e, _)| *e == event.to_string())
             .map(|(_, count)| count.parse::<u64>())
             .ok_or(anyhow!("error getting memory.high event count"))
-            .with_tee(|| format!("failed to find entry for memory high events in {path}"))?
+            .with_tee(|| format!("failed to find entry for memory.high events in {path}"))?
             .tee("failed to parse memory.high as u64")?)
     }
 
