@@ -115,12 +115,12 @@ impl CgroupState {
 
     #[tracing::instrument(skip(self))]
     pub async fn set_memory_limits(&mut self, available_memory: u64) -> Result<()> {
-        info!("setting memory limits for cgroup {}", self.manager.name);
+        info!(name = self.manager.name, "setting memory limits for cgroup");
         let new_high = self.config.calculate_memory_high_value(available_memory);
         info!(
-            "total memory available for cgroup {} is {} MiB. Setting cgroup memory.",
             self.manager.name,
-            mib(new_high)
+            memory = mib(new_high),
+            "Setting cgroup memory.",
         );
 
         // We don't want to block here, just clear any outstanding event if there is one
@@ -134,10 +134,7 @@ impl CgroupState {
             .set_limits(&limits)
             .tee("failed to set cgroup memory limits")?;
 
-        info!(
-            "successfully set cgroup {} memory limits",
-            self.manager.name
-        );
+        info!(self.manager.name, "successfully set cgroup memory limits");
         Ok(())
     }
 
@@ -146,7 +143,7 @@ impl CgroupState {
         // FIXME: we should have "proper" error handling instead of just panicking. It's hard to
         // determine what the correct behavior should be if a cgroup operation fails, though.
         let state = Arc::clone(self);
-        info!("starting main signals loop for {}", state.manager.name);
+        info!(state.manager.name, "starting main signals loop");
         tokio::spawn(async move {
             let mut waiting_on_upscale = false;
             let mut wait_to_increase_memory_high = Timer::new(0);
@@ -166,7 +163,7 @@ impl CgroupState {
                         info!("received upscale event");
                         match bundle {
                             Ok((resources, tx)) => {
-                                info!("cgroup manager confirming upscale of {resources:?}");
+                                info!(?resources, "cgroup manager confirming upscale");
                                 // Report back that we're done handling the event.
                                 // This is *important* as the dispatcher is waiting on hearing back!
                                 if let Err(_) = tx.send(()) {
@@ -222,6 +219,7 @@ impl CgroupState {
                                     tokio::select! {
                                         biased;
                                         _ = &mut wait_to_increase_memory_high => {
+                                            info!("received memory.high event, too soon to re-freeze, but increasing memory.high");
                                             tokio::select! {
                                                 biased;
                                                 bundle = state.notify_upscale_events.recv() => {
@@ -254,9 +252,10 @@ impl CgroupState {
                                             };
 
                                             let new_high = mem_high + state.config.memory_high_increase_by_bytes;
-                                            info!("updating memory.high from {} -> {} Mib",
-                                                  mib(mem_high),
-                                                  mib(new_high)
+                                            info!(
+                                                 old = mib(mem_high),
+                                                 new = mib(new_high),
+                                                "updating memory.high (MiB)",
                                             );
 
                                             if let Err(e) = state.manager.set_high_bytes(new_high) {
@@ -269,8 +268,6 @@ impl CgroupState {
                                             // Can't do anything
                                         }
                                     }
-
-                                    info!("received memory.high event, too soon to re-freeze, but increasing memory.high");
                                 }
                             }
                         }
@@ -314,8 +311,8 @@ impl CgroupState {
         let must_thaw = Timer::new(self.config.max_upscale_wait_millis);
 
         info!(
-            "sending request for immediate upscaling, waiting for at most {}",
-            self.config.max_upscale_wait_millis
+            wait = self.config.max_upscale_wait_millis,
+            "sending request for immediate upscaling. Waiting.",
         );
 
         self.request_upscale()
@@ -328,7 +325,10 @@ impl CgroupState {
         tokio::select! {
             bundle = self.notify_upscale_events.recv() => {
                 total_wait = start.elapsed();
-                info!("received notification that upscale occured after {total_wait:?}. Thawing cgroup.");
+                info!(
+                    wait = total_wait.as_millis(),
+                    "received notification that upscale occured after {total_wait:?} ms. Thawing cgroup.",
+                );
                 match bundle {
                     Ok((_, tx)) => {
                         // Report back that we're done handling the event.
@@ -343,7 +343,10 @@ impl CgroupState {
             }
             _ = must_thaw => {
                 total_wait = start.elapsed();
-                info!("time out after {total_wait:?} waiting for upscale. Thawing cgroup.")
+                info!(
+                    wait = total_wait.as_millis(),
+                    "timeout after {total_wait:?} ms waiting for upscale. Thawing cgroup.",
+                )
             }
         };
 

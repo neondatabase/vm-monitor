@@ -104,9 +104,9 @@ where
 
             let new_size = file_cache.config.calculate_cache_size(mem);
             info!(
-                "initial file cache size: {}, setting to {}",
-                mib(size),
-                mib(new_size)
+                initial = mib(size),
+                new = mib(new_size),
+                "setting initial file cache size",
             );
 
             // note: even if size == new_size, we want to explicitly set it, just
@@ -159,7 +159,7 @@ where
     /// Attempt to downscale filecache + cgroup
     #[tracing::instrument(skip(self))]
     pub async fn try_downscale(&self, target: Resources) -> Result<DownscaleStatus> {
-        info!("attempting to downscale to {target:?}");
+        info!(?target, "attempting to downscale");
 
         // Nothing to adjust
         if self.cgroup.is_none() && self.filecache.is_none() {
@@ -197,7 +197,7 @@ where
                     mib(cgroup.config.memory_high_buffer_bytes)
                 );
 
-                info!("discontinuing downscale: {status}");
+                info!(status, "discontinuing downscale");
 
                 return Ok(DownscaleStatus::new(false, status));
             }
@@ -245,15 +245,17 @@ where
         }
 
         // TODO: make this status thing less jank
-        info!("downscale successful: {}", status.join("; "));
+        let status = status.join("; ");
 
-        Ok(DownscaleStatus::new(true, status.join("; ")))
+        info!(status, "downscale successful");
+
+        Ok(DownscaleStatus::new(true, status))
     }
 
     /// Handle new resources
     #[tracing::instrument(skip(self))]
     pub async fn handle_upscale(&self, resources: Resources) -> Result<()> {
-        info!("handling agent-granted upscale to {resources:?}");
+        info!(?resources, "handling agent-granted upscale");
 
         if self.filecache.is_none() && self.cgroup.is_none() {
             info!("no action needed for upscale (no cgroup or file cache enabled)");
@@ -272,9 +274,9 @@ where
 
             let expected_usage = file_cache.config.calculate_cache_size(usable_system_memory);
             info!(
-                "Updating file cache size, target = {} MiB, total_memory = {} MiB",
-                mib(expected_usage),
-                mib(new_mem)
+                target = mib(expected_usage),
+                total = mib(new_mem),
+                "Updating file cache size",
             );
 
             let actual_usage = file_cache
@@ -296,10 +298,10 @@ where
             let available_memory = usable_system_memory - file_cache_mem_usage;
             let new_cgroup_mem_high = cgroup.config.calculate_memory_high_value(available_memory);
             info!(
-                "Updating cgroup {name} memory.high: target = {} MiB, total_memory = {} MiB",
-                mib(new_cgroup_mem_high),
-                mib(new_mem),
-                name = cgroup.manager.name
+                target = mib(new_cgroup_mem_high),
+                total = mib(new_mem),
+                name = cgroup.manager.name,
+                "Updating cgroup memory.high",
             );
             let limits = MemoryLimits::new(new_cgroup_mem_high, available_memory);
             cgroup
@@ -403,7 +405,7 @@ where
                 }
             };
             if let Some(msg) = msg {
-                debug!("received packet: {msg:?}");
+                debug!(packet = ?msg, "received packet");
                 // Maybe have another thread do this work? Can lead to out of order?
                 match msg {
                     Ok(msg) => {

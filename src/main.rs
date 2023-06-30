@@ -24,11 +24,11 @@ async fn main() -> Result<()> {
     let mut monitor = Monitor::new(Default::default(), args, informant).await?;
     match monitor.run().await {
         Ok(_) => {
-            error!("Monitor stopped running but returned Ok(())");
+            error!(error = "Monitor stopped running but returned Ok(())");
             unreachable!("Monitor stopped running but returned Ok(())")
         }
         Err(e) => {
-            error!("Monitor terminated on {e}");
+            error!(error = ?e, "Monitor terminated on {e}");
             return Err(e);
         }
     }

@@ -4,8 +4,7 @@ use crate::LogContext;
 use anyhow::{bail, Result};
 use tokio_postgres::Client;
 use tokio_postgres::NoTls;
-use tracing::info;
-use tracing::warn;
+use tracing::{info, error};
 
 #[derive(Debug)]
 pub struct FileCacheState {
@@ -143,9 +142,11 @@ impl FileCacheState {
             .await
             .tee("failed to connect to pg client")?;
 
+        // The connection object performs the actual communication with the database,
+        // so spawn it off to run on its own. See tokio-postgres docs.
         tokio::spawn(async move {
             if let Err(e) = conn.await {
-                warn!("postgres error: {e}")
+                error!(error = ?e, "postgres error: {e}")
             }
         });
 
@@ -195,7 +196,11 @@ impl FileCacheState {
             ""
         };
 
-        info!("updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}",);
+        info!(
+            size = num_mb,
+            max = max_mb,
+            "updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}",
+        );
 
         self.client
             .execute(

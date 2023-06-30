@@ -138,7 +138,10 @@ impl Manager {
                     biased;
                     _ = &mut waiter => (),
                     _ = future::ready(()) => {
-                        info!("respecting minimum wait of {min_wait:?} ms before restarting memory.events listener");
+                        info!(
+                            wait = min_wait,
+                            "respecting minimum wait of {min_wait:?} ms before restarting memory.events listener",
+                        );
                         (&mut waiter).await;
                         info!("restarting memory.events listener")
                     }
@@ -174,7 +177,10 @@ impl Manager {
         // TODO: change this to general memory information in the future?
         let high = Self::get_event_count(&name, MemoryEvent::High)
             .tee("failed to extract number of memory high events from memory.events")?;
-        info!("the current number of memory high events: {high}");
+        info!(
+            events = high,
+            "the current number of memory high events: {high}"
+        );
 
         // Ignore the first set of events. We don't actually want to be notified
         // on startup since some processes might already be running.
@@ -283,10 +289,7 @@ impl Manager {
 
     pub fn set_limits(&self, limits: &MemoryLimits) -> Result<()> {
         let _ = self.memory_update_lock.lock();
-        info!(
-            "writing new memory limits: high => {}, max => {}",
-            limits.high, limits.max
-        );
+        info!(limits.high, limits.max, "writing new memory limits",);
         Ok(self
             .memory()
             .tee("failed to get memory subsystem while setting memory limits")?
