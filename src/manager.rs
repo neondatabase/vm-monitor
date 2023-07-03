@@ -179,7 +179,7 @@ impl Manager {
         });
 
         // Log out an initial memory.high event count
-        // 
+        //
         // Note: in theory, this is a little risky because in we guard
         // every acces to cgroup files with a lock. In reality, writing to the
         // "file" should be very fast, there should be very little contention,

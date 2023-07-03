@@ -112,7 +112,10 @@ impl CgroupState {
 
     #[tracing::instrument(skip(self))]
     pub async fn set_memory_limits(&mut self, available_memory: u64) -> Result<()> {
-        info!(name = self.manager.name, action = "setting memory limits for cgroup");
+        info!(
+            name = self.manager.name,
+            action = "setting memory limits for cgroup"
+        );
         let new_high = self.config.calculate_memory_high_value(available_memory);
         info!(
             self.manager.name,

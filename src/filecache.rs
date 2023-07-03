@@ -199,7 +199,8 @@ impl FileCacheState {
         info!(
             size = num_mb,
             max = max_mb,
-            action = format!("updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}"),
+            action =
+                format!("updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}"),
         );
 
         self.client
