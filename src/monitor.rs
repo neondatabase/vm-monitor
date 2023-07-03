@@ -405,7 +405,7 @@ where
                 }
             };
             if let Some(msg) = msg {
-                debug!(packet = ?msg, "received packet");
+                debug!(packet = ?msg, action = "receiving packet");
                 // Maybe have another thread do this work? Can lead to out of order?
                 match msg {
                     Ok(msg) => {

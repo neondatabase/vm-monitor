@@ -3,7 +3,7 @@ use clap::Parser;
 use std::fmt::{Debug, Display};
 use sysinfo::{RefreshKind, System, SystemExt};
 use tap::TapFallible;
-use tracing::{error, error_span, span, Level, Span};
+use tracing::error;
 
 #[derive(Parser, Debug)]
 pub struct Args {
@@ -25,6 +25,7 @@ pub fn mib(bytes: u64) -> f32 {
 pub fn get_total_system_memory() -> u64 {
     System::new_with_specifics(RefreshKind::new().with_memory()).total_memory()
 }
+
 /// A trait meant to be implemented for error types that attaches a context to
 /// an error as well as logging it out.
 pub trait LogContext<T, E>: TapFallible + Context<T, E>

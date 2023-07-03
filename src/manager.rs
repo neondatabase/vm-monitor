@@ -7,8 +7,10 @@ use std::{
     fs, future, mem,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Mutex,
+        Arc, Mutex,
     },
+    thread,
+    time::Duration,
 };
 
 use anyhow::{anyhow, bail, Error, Result};
@@ -54,7 +56,10 @@ pub struct Manager {
     /// the mutex), so it is guaranteed to never be held across await points.
     ///
     /// Design note: perhaps we could make a new struct combining
-    memory_update_lock: Mutex<()>,
+    ///
+    /// TODO: this should only be an Arc as long as we have the deadlock checker
+    /// (hopefully only  in debug). Otherwise we don't need the sharing.
+    memory_update_lock: Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -173,8 +178,13 @@ impl Manager {
             }
         });
 
-        // Log out an initial memory.events summary
-        // TODO: change this to general memory information in the future?
+        // Log out an initial memory.high event count
+        // 
+        // Note: in theory, this is a little risky because in we guard
+        // every acces to cgroup files with a lock. In reality, writing to the
+        // "file" should be very fast, there should be very little contention,
+        // and the only other thing that could access the file is the the thread
+        // we just spawned. Therefore, the likelihood of a race is very small.
         let high = Self::get_event_count(&name, MemoryEvent::High)
             .tee("failed to extract number of memory.high events from memory.events")?;
         info!(
@@ -192,12 +202,20 @@ impl Manager {
             )
         };
 
+        let memory_update_lock = Arc::new(Mutex::new(()));
+        let clone = Arc::clone(&memory_update_lock);
+        // Start deadlock checker
+        thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_millis(1000));
+            let _lock = clone.lock().unwrap();
+        });
+
         Ok(Self {
             highs: event_rx,
             errors: error_rx,
             name,
             cgroup,
-            memory_update_lock: Mutex::new(()),
+            memory_update_lock,
         })
     }
 
@@ -252,6 +270,9 @@ impl Manager {
             .tee("failed to thaw")?)
     }
 
+    // Note: this method does not requires a lock because getting a handle to
+    // the subsystem does not access any of the files we care about, such as
+    // memory.high and memory.events
     fn memory(&self) -> Result<&MemController> {
         if let Some(Mem(memory)) = self
             .cgroup
@@ -266,6 +287,8 @@ impl Manager {
     }
 
     pub fn current_memory_usage(&self) -> Result<u64> {
+        let _lock = self.memory_update_lock.lock().unwrap();
+        info!("acquired lock on cgroup memory.* files");
         Ok(self
             .memory()
             .tee("failed to get memory subsystem")?
@@ -274,7 +297,8 @@ impl Manager {
     }
 
     pub fn set_high_bytes(&self, bytes: u64) -> Result<()> {
-        let _ = self.memory_update_lock.lock();
+        let _lock = self.memory_update_lock.lock().unwrap();
+        info!("acquired lock on cgroup memory.* files");
         Ok(self
             .memory()
             .tee("failed to get memory subsystem")?
@@ -288,8 +312,13 @@ impl Manager {
     }
 
     pub fn set_limits(&self, limits: &MemoryLimits) -> Result<()> {
-        let _ = self.memory_update_lock.lock();
-        info!(limits.high, limits.max, action = "writing new memory limits",);
+        let _lock = self.memory_update_lock.lock().unwrap();
+        info!("acquired lock on cgroup memory.* files");
+        info!(
+            limits.high,
+            limits.max,
+            action = "writing new memory limits",
+        );
         Ok(self
             .memory()
             .tee("failed to get memory subsystem while setting memory limits")?
@@ -306,6 +335,7 @@ impl Manager {
 
     pub fn get_high_bytes(&self) -> Result<u64> {
         let _ = self.memory_update_lock.lock();
+        info!("acquired lock on cgroup memory.* files");
         let high = self
             .memory()
             .tee("failed to get memory subsystem while getting memory statistics")?
