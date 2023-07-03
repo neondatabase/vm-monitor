@@ -56,10 +56,7 @@ pub struct Manager {
     /// the mutex), so it is guaranteed to never be held across await points.
     ///
     /// Design note: perhaps we could make a new struct combining
-    ///
-    /// TODO: this should only be an Arc as long as we have the deadlock checker
-    /// (hopefully only  in debug). Otherwise we don't need the sharing.
-    memory_update_lock: Arc<Mutex<()>>,
+    memory_update_lock: Mutex<()>,
 }
 
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
@@ -202,13 +199,7 @@ impl Manager {
             )
         };
 
-        let memory_update_lock = Arc::new(Mutex::new(()));
-        let clone = Arc::clone(&memory_update_lock);
-        // Start deadlock checker
-        thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_millis(1000));
-            let _lock = clone.lock().unwrap();
-        });
+        let memory_update_lock = Mutex::new(());
 
         Ok(Self {
             highs: event_rx,
