@@ -252,11 +252,16 @@ impl Manager {
     /// thus blocking the manager until a high event was received if there was none
     /// at the time of the call. Lesson: it is crucial that this be non-blocking.
     pub fn flush_high_event(&self) -> Result<()> {
-        self
-            .highs
-            .try_recv()
-            .with_tee(|| format!("failed to clear possible outstanding memory.high event"))
-            .map(|_| {})
+        match self.highs.try_recv() {
+            Ok(high) => {
+                info!(high, action = "flushed memory.high event");
+                Ok(())
+            }
+            Err(TryRecvError::Empty) => Ok(()), // Nothing to flush, all good
+            Err(TryRecvError::Closed) => {
+                bail!("failed to flush possible outstanding high event due to closed channel")
+            }
+        }
     }
 
     /// Read memory.events for the desired event type.
