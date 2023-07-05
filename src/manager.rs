@@ -242,6 +242,23 @@ impl Manager {
         })
     }
 
+    /// Clear a memory.high event is there is one in a non-blocking way.
+    ///
+    /// This is mainly called when we are upscaled - as the upscale presumably
+    /// deals with the outstanding event.
+    ///
+    /// Retrospective: there was an error during inital development of the monitor
+    /// where cancelling an upscale event was done with a simple `self.highs.recv().await`,
+    /// thus blocking the manager until a high event was received if there was none
+    /// at the time of the call. Lesson: it is crucial that this be non-blocking.
+    pub fn flush_high_event(&self) -> Result<()> {
+        self
+            .highs
+            .try_recv()
+            .with_tee(|| format!("failed to clear possible outstanding memory.high event"))
+            .map(|_| {})
+    }
+
     /// Read memory.events for the desired event type.
     fn get_event_count(name: &str, event: MemoryEvent) -> Result<u64> {
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);

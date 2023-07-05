@@ -123,10 +123,7 @@ impl CgroupState {
             action = "setting cgroup memory",
         );
 
-        // We don't want to block here, just clear any outstanding event if there is one
-        if let Err(TryRecvError::Closed) = self.manager.highs.try_recv() {
-            bail!("failed to clear memory.high events due to channel being closed")
-        }
+        self.manager.flush_high_event()?;
 
         let limits = MemoryLimits::new(new_high, available_memory);
 
@@ -172,7 +169,8 @@ impl CgroupState {
                             }
                             Err(e) => panic!("error listening for upscales, {e}")
                         }
-                        let _ = state.manager.highs.recv().await;
+
+                        state.manager.flush_high_event().unwrap();
                     }
 
                     _ = state.manager.highs.recv() => {
@@ -366,10 +364,7 @@ impl CgroupState {
             .thaw()
             .with_tee(|| format!("failed to thaw cgroup {}", self.manager.name))?;
 
-        // We don't want to block here, just clear any outstanding event if there is one
-        if let Err(TryRecvError::Closed) = self.manager.highs.try_recv() {
-            bail!("failed to clear memory.high events due to channel being closed")
-        }
+        self.manager.flush_high_event()?;
 
         return Ok(!upscaled);
     }
