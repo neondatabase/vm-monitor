@@ -35,4 +35,4 @@ that the receiver received and processed the data.
 [`tracing-subscriber`]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/
 [`async_std::channel`]: https://docs.rs/async-std/latest/async_std/channel/index.html
 [`tokio::sync::broadcast::channel`]: https://docs.rs/tokio/latest/tokio/sync/broadcast/index.html
-[`tokio::oneshot`]: https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html
+[`tokio::sync::oneshot::Sender`]: https://docs.rs/tokio/latest/tokio/sync/oneshot/index.html

@@ -1,4 +1,4 @@
-# 'vm-monitor'
+# vm-monitor
 
 The `vm-monitor` is one component of Neon's [autoscaling] system for VMs. The
 monitor resides within a compute instance and manages a cgroup running Postgres.
