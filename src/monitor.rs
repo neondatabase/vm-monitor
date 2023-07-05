@@ -1,5 +1,5 @@
 //! # `monitor`
-//! 
+//!
 //! Where the action happens: starting monitor, handling packets received from
 //! informant and sending upscale requests
 

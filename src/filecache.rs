@@ -58,7 +58,7 @@ impl Default for FileCacheConfig {
     fn default() -> Self {
         Self {
             in_memory: true,
-            resource_multiplier: 0.75,                  // 75 %
+            resource_multiplier: 0.75,            // 75 %
             min_remaining_after_cache: 640 * MiB, // 640 MiB; (512 + 128)
             spread_factor: 0.1, // ensure any increase in file cache size is split 90-10 with 10% to other memory
         }

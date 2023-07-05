@@ -1,7 +1,7 @@
 use std::{future, sync::Arc, time::Instant};
 
-use anyhow::{bail, Result};
-use async_std::channel::{Receiver, Sender, TryRecvError};
+use anyhow::Result;
+use async_std::channel::{Receiver, Sender};
 use tokio::sync::oneshot;
 use tracing::info;
 
