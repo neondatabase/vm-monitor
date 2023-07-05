@@ -1,22 +1,9 @@
-/// # bridge
-///
-/// The bridge module mediates the follow exchanges between the monitor and
-/// informant.
-///
-/// Monitor: RequestUpscale
-/// Informant: Returns No Data
-///
-/// Informant: TryDownscale
-/// Monitor: Returns DownscaleResult
-///
-/// Informant: ResourceMessage
-/// Monitor: Returns No Data
-///
-/// Note: messages don't need to carry uuid's because the monitor and informant
-/// are always linked. The monitor has no knowledge of autoscaler-agents
-///
-/// The monitor and informant are connected via websocket on port 10369
-///
+//! # bridge
+//!
+//! Contains types that manage the interaction (not data intercahnge, see
+//! `transport`) between informant and monitor. The `Dispatcher` is a handy
+//! way to process and send packets in a straightforward way.
+
 use anyhow::Result;
 use async_std::channel::{Receiver, Sender};
 use futures_util::{

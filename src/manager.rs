@@ -1,7 +1,11 @@
+//! # `manager`
+//!
+//! `manager` exposes a `Manager` type that represents a managed cgroup with all
+//! the functionality we need.
+
 // Need to think about who is releasing/initing the cgroup
 // Instead of channels, could use condvars and callback?
 // TODO: is it ok to just unwrap channel errors? How could we handle them?
-
 use std::{
     fmt::Display,
     fs, future, mem,
@@ -26,10 +30,13 @@ use cgroups_rs::{
 use futures_util::StreamExt;
 use inotify::{Inotify, WatchMask};
 use notify::Event;
-use tracing::{info, warn};
+use tracing::{info, trace, warn};
 
 use crate::{timer::Timer, LogContext};
 
+/// `Manager` basically represents a cgroup. Its methods cover the behaviour we
+/// want from said cgroup, such as increasing and decreasing memory.{max,high},
+/// monitoring the cgroup usage, and freezing and thawing the cgroup.
 #[derive(Debug)]
 pub struct Manager {
     /// Receives updates on memory.high events
@@ -45,6 +52,8 @@ pub struct Manager {
     pub(crate) errors: Receiver<Error>,
 
     pub(crate) name: String,
+
+    /// The underlying cgroup that we are managing.
     pub(crate) cgroup: Cgroup,
 
     /// # Safety
@@ -62,6 +71,7 @@ pub struct Manager {
     memory_update_lock: Arc<Mutex<()>>,
 }
 
+/// A memory event type reported in memory.events.
 #[derive(Debug, Eq, PartialEq, Copy, Clone)]
 pub enum MemoryEvent {
     Low,
@@ -85,6 +95,8 @@ impl Display for MemoryEvent {
     }
 }
 
+/// Represents a set of limits we apply to a cgroup to control memory usage. Setting
+/// these values also affects the thresholds for receiving usage alerts.
 #[derive(Debug)]
 pub struct MemoryLimits {
     high: u64,
@@ -99,10 +111,11 @@ impl MemoryLimits {
 
 impl Manager {
     /// Load the cgroup named `name`. This should just be the name of the cgroup,
-    /// and not include anything like /sys/fs/cgroups
+    /// and not include anything like /sys/fs/cgroups. Starts a listener that
+    /// sends events to self.highs and self.errors.
     #[tracing::instrument]
     pub async fn new(name: String) -> Result<Self> {
-        // TODO: check for cgroup mode
+        // Make sure cgroups v2 are supported
         if !is_cgroup2_unified_mode() {
             bail!("cgroups v2 not supported");
         }
@@ -123,7 +136,10 @@ impl Manager {
         let (event_tx, event_rx) = channel::bounded(1);
         let (error_tx, error_rx) = channel::bounded(1);
 
-        let min_wait = 1000; // 1000ms = 1s
+        // The duration to separate restarts of the listener by.
+        // 1000ms = 1s
+        let min_wait = 1000;
+
         let mut waiter = Timer::new(min_wait);
         let high_count = AtomicU64::new(0);
         let name_clone = name.clone();
@@ -141,7 +157,10 @@ impl Manager {
                 // iteration because of how waiter is initialized.
                 tokio::select! {
                     biased;
+                    // If the time has elapsed, continue
                     _ = &mut waiter => (),
+
+                    // Otherwise, be explicit about waiting it out
                     _ = future::ready(()) => {
                         info!(
                             wait = min_wait,
@@ -152,6 +171,7 @@ impl Manager {
                     }
                 };
 
+                // Start the timer in the background
                 waiter = Timer::new(min_wait);
 
                 // Read memory.events and send an update down the channel if the number of high events
@@ -162,6 +182,7 @@ impl Manager {
                         Ok(_) => {
                             if let Ok(high) = Self::get_event_count(&name_clone, MemoryEvent::High)
                             {
+                                // Only send an event if the high count is higher.
                                 if high_count.fetch_max(high, Ordering::SeqCst) < high {
                                     event_tx.send(high).await.unwrap()
                                 }
@@ -195,7 +216,7 @@ impl Manager {
         // Ignore the first set of events. We don't actually want to be notified
         // on startup since some processes might already be running.
         // We don't want to block here as that would interrupt the rest of
-        // startup, so we use try_recv
+        // startup, so we use try_recv to flush a possible event.
         if let Err(TryRecvError::Closed) = event_rx.try_recv() {
             bail!(
                 "failed to clear initial memory.high event count due to event channel being closed"
@@ -206,8 +227,10 @@ impl Manager {
         let clone = Arc::clone(&memory_update_lock);
         // Start deadlock checker
         thread::spawn(move || loop {
+            trace!(action = "waiting 1 second to take memory update lock");
             std::thread::sleep(Duration::from_millis(1000));
             let _lock = clone.lock().unwrap();
+            trace!("memory update lock taken and released")
         });
 
         Ok(Self {
@@ -223,6 +246,11 @@ impl Manager {
     fn get_event_count(name: &str, event: MemoryEvent) -> Result<u64> {
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
         let contents = fs::read_to_string(&path).expect("failed to read memory events info");
+
+        // Then contents of the file look like:
+        // low 42
+        // high 101
+        // ...
         Ok(contents
             .lines()
             .filter_map(|s| s.split_once(' '))
@@ -233,6 +261,7 @@ impl Manager {
             .tee("failed to parse memory.high as u64")?)
     }
 
+    /// Retrieve whether cgroup is frozen or thawed.
     pub fn state(&self) -> Result<FreezerState> {
         Ok(self
             .freezer()
@@ -241,6 +270,7 @@ impl Manager {
             .tee("failed to get freezer state")?)
     }
 
+    /// Get a handle on the freezer subsystem.
     fn freezer(&self) -> Result<&FreezerController> {
         if let Some(Freezer(freezer)) = self
             .cgroup
@@ -254,6 +284,7 @@ impl Manager {
         }
     }
 
+    /// Attempt to freeze the cgroup.
     pub fn freeze(&self) -> Result<()> {
         Ok(self
             .freezer()
@@ -262,6 +293,7 @@ impl Manager {
             .tee("failed to freeze")?)
     }
 
+    /// Attempt to thaw the cgroup.
     pub fn thaw(&self) -> Result<()> {
         Ok(self
             .freezer()
@@ -270,9 +302,11 @@ impl Manager {
             .tee("failed to thaw")?)
     }
 
-    // Note: this method does not requires a lock because getting a handle to
-    // the subsystem does not access any of the files we care about, such as
-    // memory.high and memory.events
+    /// Get a handle on the memory subsystem.
+    ///
+    /// Note: this method does not require `self.memory_update_lock` because
+    /// getting a handle to the subsystem does not access any of the files we
+    /// care about, such as memory.high and memory.events
     fn memory(&self) -> Result<&MemController> {
         if let Some(Mem(memory)) = self
             .cgroup
@@ -286,6 +320,7 @@ impl Manager {
         }
     }
 
+    /// Get cgroup current memory usage.
     pub fn current_memory_usage(&self) -> Result<u64> {
         let _lock = self.memory_update_lock.lock().unwrap();
         info!("acquired lock on cgroup memory.* files");
@@ -296,6 +331,7 @@ impl Manager {
             .usage_in_bytes)
     }
 
+    /// Set cgroup memory.high threshold.
     pub fn set_high_bytes(&self, bytes: u64) -> Result<()> {
         let _lock = self.memory_update_lock.lock().unwrap();
         info!("acquired lock on cgroup memory.* files");
@@ -311,6 +347,7 @@ impl Manager {
             .tee("failed to set memory.high")?)
     }
 
+    /// Set cgroup memory.high and memory.max.
     pub fn set_limits(&self, limits: &MemoryLimits) -> Result<()> {
         let _lock = self.memory_update_lock.lock().unwrap();
         info!("acquired lock on cgroup memory.* files");
@@ -333,6 +370,7 @@ impl Manager {
             .tee("failed to set memory limits")?)
     }
 
+    /// Get memory.high threshold.
     pub fn get_high_bytes(&self) -> Result<u64> {
         let _ = self.memory_update_lock.lock();
         info!("acquired lock on cgroup memory.* files");

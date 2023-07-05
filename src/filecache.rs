@@ -1,11 +1,13 @@
 // TODO: should all fields be pub(crate)?
 
 use crate::LogContext;
+use crate::MiB;
 use anyhow::{bail, Result};
 use tokio_postgres::Client;
 use tokio_postgres::NoTls;
 use tracing::{error, info};
 
+/// Manages Postgres' file cache by keeping a connection open.
 #[derive(Debug)]
 pub struct FileCacheState {
     client: Client,
@@ -57,13 +59,14 @@ impl Default for FileCacheConfig {
         Self {
             in_memory: true,
             resource_multiplier: 0.75,                  // 75 %
-            min_remaining_after_cache: 640 * (1 << 20), // 640 MiB; (512 + 128)
+            min_remaining_after_cache: 640 * MiB, // 640 MiB; (512 + 128)
             spread_factor: 0.1, // ensure any increase in file cache size is split 90-10 with 10% to other memory
         }
     }
 }
 
 impl FileCacheConfig {
+    /// Make sure fields of the config are consistent.
     pub fn validate(&self) -> Result<()> {
         // Single field validity
         if !(0.0 < self.resource_multiplier && self.resource_multiplier < 1.0) {
@@ -72,7 +75,6 @@ impl FileCacheConfig {
                 self.resource_multiplier
             )
         } else if self.spread_factor < 0.0 {
-            // TODO: does floating point stuff require we check !(self.spread_factor >= 0.0)?
             bail!("spread_factor must be >= 0, got {}", self.spread_factor)
         } else if self.min_remaining_after_cache == 0 {
             bail!("min_remaining_after_cache must not be 0");
@@ -106,8 +108,6 @@ impl FileCacheConfig {
 
         let intersect_factor = self.resource_multiplier * (self.spread_factor + 1.0);
         if intersect_factor >= 1.0 {
-            // TODO: once again, does floating point evilness require we check if
-            // !(intersect_factor < 1.0)
             bail!("incompatible ResourceMultiplier and SpreadFactor");
         }
         Ok(())
@@ -128,7 +128,7 @@ impl FileCacheConfig {
 
         let byte_size = size_from_spread.min(size_from_normal);
 
-        let mib: u64 = 1 << 20;
+        let mib: u64 = MiB;
 
         // The file cache operates in units of mebibytes, so the sizes we produce should
         // be rounded to a mebibyte. We wound down to be conservative.
@@ -137,6 +137,8 @@ impl FileCacheConfig {
 }
 
 impl FileCacheState {
+    /// Connect to the file cache.
+    #[tracing::instrument]
     pub async fn new(conn_str: &str, config: FileCacheConfig) -> Result<Self> {
         let (client, conn) = tokio_postgres::connect(conn_str, NoTls)
             .await
@@ -154,6 +156,8 @@ impl FileCacheState {
         Ok(Self { client, config })
     }
 
+    /// Get the current size of the file cache.
+    #[tracing::instrument]
     pub async fn get_file_cache_size(&self) -> Result<u64> {
         Ok(self
             .client
@@ -170,6 +174,9 @@ impl FileCacheState {
             .tee("failed to extract file cache size from query result")?)
     }
 
+    /// Attempt to set the file cache size, returning the size it was actually
+    /// set to.
+    #[tracing::instrument]
     pub async fn set_file_cache_size(&self, num_bytes: u64) -> Result<u64> {
         let max_bytes = self
             .client
@@ -183,8 +190,8 @@ impl FileCacheState {
             .map(|bytes| bytes as u64)
             .tee("failed to extract amx file cache size form query result")?;
 
-        let mut num_mb = num_bytes / (1 << 20);
-        let max_mb = max_bytes / (1 << 20);
+        let mut num_mb = num_bytes / MiB;
+        let max_mb = max_bytes / MiB;
 
         if num_bytes > max_bytes {
             num_mb = max_mb;
@@ -216,6 +223,6 @@ impl FileCacheState {
             .await
             .tee("failed to reload config")?;
 
-        Ok(num_mb * (1 << 20))
+        Ok(num_mb * MiB)
     }
 }

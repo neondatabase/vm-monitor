@@ -9,6 +9,9 @@ use tokio::{task::JoinHandle, time::sleep};
 pub struct Timer(JoinHandle<()>);
 
 impl Timer {
+    /// Creates a new `Timer` that starts running in the background. You can
+    /// `.await` it to manually synchronize an action with the timer finishing.
+    /// After `millis`, the timer while immediately return `Poll::Ready`.
     pub fn new(millis: u64) -> Self {
         Timer(tokio::spawn(async move {
             sleep(Duration::from_millis(millis)).await
