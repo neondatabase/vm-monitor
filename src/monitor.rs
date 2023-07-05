@@ -1,3 +1,8 @@
+//! # `monitor`
+//! 
+//! Where the action happens: starting monitor, handling packets received from
+//! informant and sending upscale requests
+
 use std::sync::Arc;
 use std::{fmt::Debug, mem};
 
@@ -21,6 +26,8 @@ use crate::{
     Args, LogContext, MiB,
 };
 
+/// Central struct that interacts with informant, dispatcher, and cgroup to handle
+/// signals from the informant.
 #[derive(Debug)]
 pub struct Monitor<S> {
     config: MonitorConfig,
@@ -60,12 +67,16 @@ impl<S> Monitor<S>
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + Debug + 'static,
 {
+    /// Create a new monitor.
     #[tracing::instrument]
     pub async fn new(config: MonitorConfig, args: Args, stream: S) -> Result<Self> {
         if config.sys_buffer_bytes == 0 {
             bail!("invalid MonitorConfig: ssy_buffer_bytes cannot be 0")
         }
         // TODO: make these bounded? Probably
+        //
+        // *NOTE*: the dispatcher and cgroup manager talk through these channels
+        // so make sure they each get the correct half, nothing is droppped, etc.
         let (notified_send, notified_recv) = channel::unbounded();
         let (requesting_send, requesting_recv) = channel::unbounded();
 
@@ -114,7 +125,7 @@ where
             let actual_size = file_cache
                 .set_file_cache_size(new_size)
                 .await
-                .tee("failed to set file cache size")?;
+                .tee("failed to set file cache size, possibly due to inadequate permissions")?;
             file_cache_reserved_bytes = actual_size;
 
             state.filecache = Some(file_cache);
@@ -144,7 +155,7 @@ where
 
             tokio::spawn(async move { clone.handle_cgroup_signals_loop().await });
         } else {
-            // We need to forget the sender so that its drop impl does not get ran.
+            // *NOTE*: We need to forget the sender so that its drop impl does not get ran.
             // This allows us to poll it in `Monitor::run` regardless of whether we
             // are managing a cgroup or not. If we don't forget it, all receives will
             // immediately return an error because the sender is droped and it will
@@ -315,6 +326,8 @@ where
         Ok(())
     }
 
+    /// Take in a pack and perform some action, such as downscaling or upscaling,
+    /// and return a packet to be send back.
     #[tracing::instrument(skip(self))]
     pub async fn process_packet(&mut self, Packet { id, stage }: Packet) -> Result<Option<Packet>> {
         match stage {

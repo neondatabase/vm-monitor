@@ -20,6 +20,7 @@ async fn main() -> Result<()> {
     let addr = "127.0.0.1:10369";
     let listener = TcpListener::bind(addr).await?;
 
+    // Wait for a connection
     let (informant, _) = listener.accept().await?;
     info!("Connected to informant on {addr}");
 
