@@ -49,6 +49,17 @@ where
         })
     }
 
+    /// Notify the cgroup manager that we have received upscale. Returns a Receiver
+    /// that the cgroup will send to as a form of acknowledging the upscale.
+    pub async fn notify_upscale(&self, resources: Resources) -> Result<oneshot::Receiver<()>> {
+        let (tx, rx) = oneshot::channel();
+        self.notify_upscale_events
+            .send((resources, tx))
+            .await
+            .tee("failed to send resources and oneshot sender across channel")?;
+        Ok(rx)
+    }
+
     /// Mainly here so we only send actual data. Otherwise, it would be easy to
     /// accidentally serialize something else and send it.
     #[tracing::instrument(skip(self))]

@@ -336,13 +336,12 @@ where
                     unreachable!("informant should never send a Request::RequestUpscale")
                 }
                 Request::NotifyUpscale(resources) => {
-                    let (tx, rx) = oneshot::channel();
                     self.handle_upscale(resources)
                         .await
                         .tee("failed to handle upscale")?;
-                    self.dispatcher
-                        .notify_upscale_events
-                        .send((resources, tx))
+                    let rx = self
+                        .dispatcher
+                        .notify_upscale(resources)
                         .await
                         .tee("failed to notify cgroup of upscale event")?;
                     rx.await
@@ -364,13 +363,12 @@ where
             },
             Stage::Response(res) => match res {
                 Response::UpscaleResult(resources) => {
-                    let (tx, rx) = oneshot::channel();
                     self.handle_upscale(resources)
                         .await
                         .tee("failed to handle upscale")?;
-                    self.dispatcher
-                        .notify_upscale_events
-                        .send((resources, tx))
+                    let rx = self
+                        .dispatcher
+                        .notify_upscale(resources)
                         .await
                         .tee("failed to notify cgroup of upscale event")?;
                     rx.await
