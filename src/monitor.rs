@@ -11,7 +11,6 @@ use async_std::channel;
 use futures_util::StreamExt;
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    sync::oneshot,
 };
 use tracing::{debug, info, warn};
 
@@ -35,6 +34,7 @@ pub struct Monitor<S> {
     // TODO: flip it inside out to Arc<Option>?
     cgroup: Option<Arc<CgroupState>>,
     dispatcher: Dispatcher<S>,
+    counter: usize,
 }
 
 #[derive(Debug)]
@@ -89,6 +89,7 @@ where
             filecache: None,
             cgroup: None,
             dispatcher,
+            counter: 0
         };
 
         let mut file_cache_reserved_bytes = 0;
@@ -399,8 +400,9 @@ where
                     match sender {
                         Ok(sender) => {
                             info!("cgroup asking for upscale; forwarding request");
+                            self.counter += 1;
                             self.dispatcher
-                                .send(Packet::new(Stage::Request(Request::RequestUpscale {}), 0))
+                                .send(Packet::new(Stage::Request(Request::RequestUpscale {}), self.counter))
                                 .await
                                 .tee("failed to send packet")?;
                             if let Err(_) = sender.send(()) {

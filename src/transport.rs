@@ -10,7 +10,7 @@
 //! informant:
 //!
 //! Monitor: RequestUpscale
-//! Informant: Returns No Data
+//! Informant: Returns Resources
 //!
 //! Informant: TryDownscale
 //! Monitor: Returns DownscaleResult
@@ -19,7 +19,7 @@
 //! Monitor: Returns No Data
 //!
 //! Note: messages don't need to carry uuid's because the monitor and informant
-//! are always linked. The monitor has no knowledge of autoscaler-agents
+//! are always linked. The monitor has no knowledge of autoscaler-agents.
 //!
 //! The pervasive use of `#[serde(tag = "stage")]` allows Go code to read the
 //! tag and then choose how to act based on the contained fields. It will try
@@ -53,9 +53,9 @@ impl Packet {
 ///    it sends back.
 /// 3. The original sender sends back a `Done` upon receiving the response.
 ///
-/// TODO: in the future more stages might be added to accomodate handling
-/// (or not handling) packets based on their sequence numbers. This will
-/// allow us to detect racy behaviour and unfavorable interleavings.
+/// *Note*: there is one special case: when the monitor sends a `RequestUpscale`.
+/// The informant will immediately respond with a `Done`. If the agent decides to
+/// upscale, we will get notified with an UpscaleResult.
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub enum Stage {
