@@ -9,9 +9,7 @@ use std::{fmt::Debug, mem};
 use anyhow::{bail, Result};
 use async_std::channel;
 use futures_util::StreamExt;
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{debug, info, warn};
 
 use crate::{
@@ -89,7 +87,7 @@ where
             filecache: None,
             cgroup: None,
             dispatcher,
-            counter: 0
+            counter: 0,
         };
 
         let mut file_cache_reserved_bytes = 0;
@@ -393,9 +391,8 @@ where
     pub async fn run(&mut self) -> Result<()> {
         info!(action = "starting dispatcher");
         loop {
-            // TODO: refactor this
-            // check if we need to propagate a request
-            let msg = tokio::select! {
+            tokio::select! {
+                // we need to propagate an upscale request
                 sender = self.dispatcher.request_upscale_events.recv() => {
                     match sender {
                         Ok(sender) => {
@@ -411,48 +408,51 @@ where
                         },
                         Err(e) => warn!("error receiving upscale event: {e}")
                     }
-                    continue
                 }
+                // there is a packet from the informant
                 msg = self.dispatcher.source.next() => {
-                    msg
-                }
-            };
-            if let Some(msg) = msg {
-                debug!(packet = ?msg, action = "receiving packet");
-                // Maybe have another thread do this work? Can lead to out of order?
-                match msg {
-                    Ok(msg) => {
-                        // Inlined for borrow checker reasons:
-                        // We only want to borrow self for as short a time as possible
-                        // and a closure borrows self for it's entire lifetime - which
-                        // is too long and prevents reading/writing the stream.
-                        let packet: Packet = match msg {
-                            tokio_tungstenite::tungstenite::Message::Text(text) => {
-                                serde_json::from_str(&text).unwrap()
-                            }
-                            tokio_tungstenite::tungstenite::Message::Binary(bin) => {
-                                serde_json::from_slice(&bin).unwrap()
-                            }
-                            _ => continue,
-                        };
+                    if let Some(msg) = msg {
+                        debug!(packet = ?msg, action = "receiving packet");
+                        // Maybe have another thread do this work? Can lead to out of order?
+                        match msg {
+                            Ok(msg) => {
+                                // Inlined for borrow checker reasons:
+                                // We only want to borrow self for as short a time as possible
+                                // and a closure borrows self for it's entire lifetime - which
+                                // is too long and prevents reading/writing the stream.
+                                let packet: Packet = match msg {
+                                    tokio_tungstenite::tungstenite::Message::Text(text) => {
+                                        serde_json::from_str(&text).unwrap()
+                                    }
+                                    tokio_tungstenite::tungstenite::Message::Binary(bin) => {
+                                        serde_json::from_slice(&bin).unwrap()
+                                    }
+                                    _ => continue,
+                                };
 
-                        let Some(out) = self.process_packet(packet).await.tee("failed to process packet")? else {
-                            continue
-                        };
+                                let Some(out) = self
+                                    .process_packet(packet)
+                                    .await
+                                    .tee("failed to process packet")?
+                                else {
+                                    continue
+                                };
 
-                        // Technically doesn't need a block, but just putting one for
-                        // clarity since the borrowing in this section is tricky
-                        {
-                            self.dispatcher
-                                .send(out)
-                                .await
-                                .tee("failed to send packet")?;
+                                // Technically doesn't need a block, but just putting one for
+                                // clarity since the borrowing in this section is tricky
+                                {
+                                    self.dispatcher
+                                        .send(out)
+                                        .await
+                                        .tee("failed to send packet")?;
+                                }
+                            }
+                            Err(e) => warn!("{e}"),
                         }
+                    } else {
+                        bail!("connection closed")
                     }
-                    Err(e) => warn!("{e}"),
                 }
-            } else {
-                bail!("connection closed")
             }
         }
     }
