@@ -1,14 +1,13 @@
-use std::{future, sync::Arc, time::Instant};
+use std::{future, sync::Arc, time::Duration};
 
 use anyhow::Result;
 use async_std::channel::{Receiver, Sender};
-use tokio::sync::oneshot;
+use tokio::{sync::oneshot, time::Instant};
 use tracing::info;
 
 use crate::{
     manager::{Manager, MemoryLimits},
     mib,
-    timer::Timer,
     transport::Resources,
     LogContext, MiB,
 };
@@ -143,8 +142,10 @@ impl CgroupState {
         info!(state.manager.name, action = "starting main signals loop");
         tokio::spawn(async move {
             let mut waiting_on_upscale = false;
-            let mut wait_to_increase_memory_high = Timer::new(0);
-            let mut wait_to_freeze = Timer::new(0);
+            let wait_to_increase_memory_high = tokio::time::sleep(Duration::ZERO);
+            let wait_to_freeze = tokio::time::sleep(Duration::ZERO);
+            tokio::pin!(wait_to_increase_memory_high);
+            tokio::pin!(wait_to_freeze);
             loop {
                 // Wait for a new signal
                 tokio::select! {
@@ -180,7 +181,9 @@ impl CgroupState {
                                 match state.handle_memory_high_event().await {
                                      Ok(b) => {
                                         waiting_on_upscale = b;
-                                        wait_to_freeze = Timer::new(state.config.do_not_freeze_more_often_than_millis);
+                                        wait_to_freeze
+                                            .as_mut()
+                                            .reset(Instant::now() + Duration::from_millis(state.config.do_not_freeze_more_often_than_millis));
                                      },
                                      Err(e) => panic!("error handling memory.high event {e}")
                                 }
@@ -266,7 +269,10 @@ impl CgroupState {
                                                 panic!("error setting memory limits: {e}")
                                             }
 
-                                            wait_to_increase_memory_high = Timer::new(state.config.memory_high_increase_every_millis)
+                                            wait_to_increase_memory_high
+                                                .as_mut()
+                                                .reset(Instant::now() + Duration::from_millis(state.config.memory_high_increase_every_millis))
+
                                         }
                                         _ = future::ready(()) => {
                                             // Can't do anything
@@ -315,7 +321,8 @@ impl CgroupState {
 
         let start = Instant::now();
 
-        let must_thaw = Timer::new(self.config.max_upscale_wait_millis);
+        let must_thaw =
+            tokio::time::sleep(Duration::from_millis(self.config.max_upscale_wait_millis));
 
         info!(
             wait = self.config.max_upscale_wait_millis,

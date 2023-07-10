@@ -31,8 +31,9 @@ use futures_util::StreamExt;
 use inotify::{Inotify, WatchMask};
 use notify::Event;
 use tracing::{info, trace, warn};
+use tokio::time::Instant;
 
-use crate::{timer::Timer, LogContext};
+use crate::LogContext;
 
 /// `Manager` basically represents a cgroup. Its methods cover the behaviour we
 /// want from said cgroup, such as increasing and decreasing memory.{max,high},
@@ -138,14 +139,16 @@ impl Manager {
 
         // The duration to separate restarts of the listener by.
         // 1000ms = 1s
-        let min_wait = 1000;
+        let min_wait = Duration::from_millis(1000);
 
-        let mut waiter = Timer::new(min_wait);
+        let timer = tokio::time::sleep(min_wait);
         let high_count = AtomicU64::new(0);
         let name_clone = name.clone();
 
+
         // Long running background task for getting memory.events updates
         tokio::spawn(async move {
+            tokio::pin!(timer);
             // TODO: how big do we want buffer to be?
             let mut events = inotify
                 .into_event_stream([0u8; 10 * mem::size_of::<Result<Event, Error>>()])
@@ -158,21 +161,21 @@ impl Manager {
                 tokio::select! {
                     biased;
                     // If the time has elapsed, continue
-                    _ = &mut waiter => (),
+                    _ = &mut timer => (),
 
                     // Otherwise, be explicit about waiting it out
                     _ = future::ready(()) => {
                         info!(
-                            wait = min_wait,
+                            wait = ?min_wait,
                             action = "respecting minimum wait of {min_wait:?} ms before restarting memory.events listener",
                         );
-                        (&mut waiter).await;
+                        timer.as_mut().await;
                         info!(action = "restarting memory.events listener")
                     }
                 };
 
                 // Start the timer in the background
-                waiter = Timer::new(min_wait);
+                timer.as_mut().reset(Instant::now() + min_wait);
 
                 // Read memory.events and send an update down the channel if the number of high events
                 // has increased
