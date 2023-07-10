@@ -66,4 +66,3 @@ pub mod cgroup;
 pub mod filecache;
 pub mod manager;
 pub mod monitor;
-pub mod timer;

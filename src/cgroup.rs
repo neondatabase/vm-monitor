@@ -42,13 +42,13 @@ pub struct CgroupConfig {
     // memory in use by the kernel's page cache that we're actually ok with getting rid of.
     pub(crate) memory_high_buffer_bytes: u64,
 
-    // max_upscale_wait_millis gives the maximum duration, in milliseconds, that we're allowed to pause
+    // max_upscale_wait gives the maximum duration, in milliseconds, that we're allowed to pause
     // the cgroup for while waiting for the autoscaler-agent to upscale us
-    max_upscale_wait_millis: u64,
+    max_upscale_wait: Duration,
 
-    // do_not_freeze_more_often_than_millis gives a required minimum time, in milliseconds, that we must
+    // do_not_freeze_more_often_than gives a required minimum time, in milliseconds, that we must
     // wait before re-freezing the cgroup while waiting for the autoscaler-agent to upscale us.
-    do_not_freeze_more_often_than_millis: u64,
+    do_not_freeze_more_often_than: Duration,
 
     // memory_high_increase_by_bytes gives the amount of memory, in bytes, that we should periodically
     // increase memory.high by while waiting for the autoscaler-agent to upscale us.
@@ -58,14 +58,14 @@ pub struct CgroupConfig {
     // https://github.com/neondatabase/autoscaling/issues/44#issuecomment-1522487217
     memory_high_increase_by_bytes: u64,
 
-    // memory_high_increase_every_millis gives the period, in milliseconds, at which we should
+    // memory_high_increase_every gives the period, in milliseconds, at which we should
     // repeatedly increase the value of the cgroup's memory.high while we're waiting on upscaling
     // and memory.high is still being hit.
     //
     // Technically speaking, this actually serves as a rate limit to moderate responding to
     // memory.high events, but these are roughly equivalent if the process is still allocating
     // memory.
-    memory_high_increase_every_millis: u64,
+    memory_high_increase_every: Duration,
 }
 
 impl Default for CgroupConfig {
@@ -74,11 +74,11 @@ impl Default for CgroupConfig {
             oom_buffer_bytes: 100 * MiB,
             memory_high_buffer_bytes: 100 * MiB,
             // while waiting for upscale, don't freeze for more than 20ms every 1s
-            max_upscale_wait_millis: 20, // 20ms
-            do_not_freeze_more_often_than_millis: 1000,
+            max_upscale_wait: Duration::from_millis(20),
+            do_not_freeze_more_often_than: Duration::from_millis(1000),
             // while waiting for upscale, increase memory.high by 10MiB every 25ms
             memory_high_increase_by_bytes: 10 * MiB,
-            memory_high_increase_every_millis: 25, // 25 ms
+            memory_high_increase_every: Duration::from_millis(25),
         }
     }
 }
@@ -183,7 +183,7 @@ impl CgroupState {
                                         waiting_on_upscale = b;
                                         wait_to_freeze
                                             .as_mut()
-                                            .reset(Instant::now() + Duration::from_millis(state.config.do_not_freeze_more_often_than_millis));
+                                            .reset(Instant::now() + state.config.do_not_freeze_more_often_than);
                                      },
                                      Err(e) => panic!("error handling memory.high event {e}")
                                 }
@@ -271,7 +271,7 @@ impl CgroupState {
 
                                             wait_to_increase_memory_high
                                                 .as_mut()
-                                                .reset(Instant::now() + Duration::from_millis(state.config.memory_high_increase_every_millis))
+                                                .reset(Instant::now() + state.config.memory_high_increase_every)
 
                                         }
                                         _ = future::ready(()) => {
@@ -322,10 +322,10 @@ impl CgroupState {
         let start = Instant::now();
 
         let must_thaw =
-            tokio::time::sleep(Duration::from_millis(self.config.max_upscale_wait_millis));
+            tokio::time::sleep(self.config.max_upscale_wait);
 
         info!(
-            wait = self.config.max_upscale_wait_millis,
+            wait = ?self.config.max_upscale_wait,
             action = "waiting",
             "sending request for immediate upscaling; waiting",
         );
