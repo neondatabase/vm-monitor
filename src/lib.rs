@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Context;
 use clap::Parser;
 use std::fmt::{Debug, Display};
 use sysinfo::{RefreshKind, System, SystemExt};
@@ -36,12 +36,12 @@ where
     /// error - thus "tee"ing the context to the logs and the error.
     ///
     // PS: sadly this does not allow attaching additional fields to the log.
-    fn tee(self, msg: &'static str) -> Result<T> {
+    fn tee(self, msg: &'static str) -> anyhow::Result<T> {
         self.tap_err(|e| error!(error=?e, msg)).context(msg)
     }
 
     /// Similar to `tee`, but evaluates the provided closure to provide context.
-    fn with_tee<F, C>(self, msg: F) -> Result<T>
+    fn with_tee<F, C>(self, msg: F) -> anyhow::Result<T>
     where
         C: Display + Send + Sync + 'static,
         F: FnOnce() -> C,

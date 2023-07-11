@@ -4,7 +4,6 @@
 //! `transport`) between informant and monitor. The `Dispatcher` is a handy
 //! way to process and send packets in a straightforward way.
 
-use anyhow::Result;
 use async_std::channel::{Receiver, Sender};
 use futures_util::{
     stream::{SplitSink, SplitStream},
@@ -36,7 +35,7 @@ where
         stream: S,
         notify_upscale_events: Sender<(Resources, oneshot::Sender<()>)>,
         request_upscale_events: Receiver<oneshot::Sender<()>>,
-    ) -> Result<Self> {
+    ) -> anyhow::Result<Self> {
         let (sink, source) = accept_async(stream)
             .await
             .tee("failed to connect to stream")?
@@ -51,7 +50,10 @@ where
 
     /// Notify the cgroup manager that we have received upscale. Returns a Receiver
     /// that the cgroup will send to as a form of acknowledging the upscale.
-    pub async fn notify_upscale(&self, resources: Resources) -> Result<oneshot::Receiver<()>> {
+    pub async fn notify_upscale(
+        &self,
+        resources: Resources,
+    ) -> anyhow::Result<oneshot::Receiver<()>> {
         let (tx, rx) = oneshot::channel();
         self.notify_upscale_events
             .send((resources, tx))
@@ -63,7 +65,7 @@ where
     /// Mainly here so we only send actual data. Otherwise, it would be easy to
     /// accidentally serialize something else and send it.
     #[tracing::instrument(skip(self))]
-    pub async fn send(&mut self, p: Packet) -> Result<()> {
+    pub async fn send(&mut self, p: Packet) -> anyhow::Result<()> {
         debug!(packet = ?p, action = "sending packet");
         let json = serde_json::to_string(&p).tee("failed to serialize packet")?;
         Ok(self

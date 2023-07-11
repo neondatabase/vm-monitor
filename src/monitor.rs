@@ -6,7 +6,6 @@
 use std::sync::Arc;
 use std::{fmt::Debug, mem};
 
-use anyhow::{bail, Result};
 use async_std::channel;
 use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -67,9 +66,9 @@ where
 {
     /// Create a new monitor.
     #[tracing::instrument]
-    pub async fn new(config: MonitorConfig, args: Args, stream: S) -> Result<Self> {
+    pub async fn new(config: MonitorConfig, args: Args, stream: S) -> anyhow::Result<Self> {
         if config.sys_buffer_bytes == 0 {
-            bail!("invalid MonitorConfig: ssy_buffer_bytes cannot be 0")
+            anyhow::bail!("invalid MonitorConfig: ssy_buffer_bytes cannot be 0")
         }
         // TODO: make these bounded? Probably
         //
@@ -168,7 +167,7 @@ where
 
     /// Attempt to downscale filecache + cgroup
     #[tracing::instrument(skip(self))]
-    pub async fn try_downscale(&self, target: Resources) -> Result<DownscaleStatus> {
+    pub async fn try_downscale(&self, target: Resources) -> anyhow::Result<DownscaleStatus> {
         info!(?target, action = "attempting to downscale");
 
         // Nothing to adjust
@@ -264,7 +263,7 @@ where
 
     /// Handle new resources
     #[tracing::instrument(skip(self))]
-    pub async fn handle_upscale(&self, resources: Resources) -> Result<()> {
+    pub async fn handle_upscale(&self, resources: Resources) -> anyhow::Result<()> {
         info!(?resources, action = "handling agent-granted upscale");
 
         if self.filecache.is_none() && self.cgroup.is_none() {
@@ -328,7 +327,10 @@ where
     /// Take in a pack and perform some action, such as downscaling or upscaling,
     /// and return a packet to be send back.
     #[tracing::instrument(skip(self))]
-    pub async fn process_packet(&mut self, Packet { id, stage }: Packet) -> Result<Option<Packet>> {
+    pub async fn process_packet(
+        &mut self,
+        Packet { id, stage }: Packet,
+    ) -> anyhow::Result<Option<Packet>> {
         match stage {
             Stage::Request(req) => match req {
                 Request::RequestUpscale {} => {
@@ -388,7 +390,7 @@ where
 
     // TODO: don't propagate errors, probably just warn!?
     #[tracing::instrument(skip(self))]
-    pub async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> anyhow::Result<()> {
         info!(action = "starting dispatcher");
         loop {
             tokio::select! {
@@ -450,7 +452,7 @@ where
                             Err(e) => warn!("{e}"),
                         }
                     } else {
-                        bail!("connection closed")
+                        anyhow::bail!("connection closed")
                     }
                 }
             }

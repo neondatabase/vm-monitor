@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::{anyhow, bail, Error, Result};
+use anyhow::anyhow;
 use async_std::channel::{self, Receiver, TryRecvError};
 use cgroups_rs::{
     cgroup::{Cgroup, UNIFIED_MOUNTPOINT},
@@ -30,8 +30,8 @@ use cgroups_rs::{
 use futures_util::StreamExt;
 use inotify::{Inotify, WatchMask};
 use notify::Event;
-use tracing::{info, trace, warn};
 use tokio::time::Instant;
+use tracing::{info, trace, warn};
 
 use crate::LogContext;
 
@@ -50,7 +50,7 @@ pub struct Manager {
     ///
     /// Note: this channel's methods should be cancellation safe, refer to the
     /// async-std source code.
-    pub(crate) errors: Receiver<Error>,
+    pub(crate) errors: Receiver<anyhow::Error>,
 
     pub(crate) name: String,
 
@@ -115,10 +115,10 @@ impl Manager {
     /// and not include anything like /sys/fs/cgroups. Starts a listener that
     /// sends events to self.highs and self.errors.
     #[tracing::instrument]
-    pub async fn new(name: String) -> Result<Self> {
+    pub async fn new(name: String) -> anyhow::Result<Self> {
         // Make sure cgroups v2 are supported
         if !is_cgroup2_unified_mode() {
-            bail!("cgroups v2 not supported");
+            anyhow::bail!("cgroups v2 not supported");
         }
 
         let cgroup = Cgroup::load(hierarchies::auto(), &name);
@@ -145,13 +145,14 @@ impl Manager {
         let high_count = AtomicU64::new(0);
         let name_clone = name.clone();
 
-
         // Long running background task for getting memory.events updates
         tokio::spawn(async move {
             tokio::pin!(timer);
             // TODO: how big do we want buffer to be?
             let mut events = inotify
-                .into_event_stream([0u8; 10 * mem::size_of::<Result<Event, Error>>()])
+                .into_event_stream(
+                    [0u8; 10 * mem::size_of::<anyhow::Result<Event, anyhow::Error>>()],
+                )
                 .expect("failed to start memory event stream");
 
             loop {
@@ -194,7 +195,7 @@ impl Manager {
                             }
                         }
                         Err(error) => {
-                            error_tx.send(Error::from(error)).await.unwrap();
+                            error_tx.send(anyhow!(error)).await.unwrap();
                             return;
                         }
                     }
@@ -221,7 +222,7 @@ impl Manager {
         // We don't want to block here as that would interrupt the rest of
         // startup, so we use try_recv to flush a possible event.
         if let Err(TryRecvError::Closed) = event_rx.try_recv() {
-            bail!(
+            anyhow::bail!(
                 "failed to clear initial memory.high event count due to event channel being closed"
             )
         };
@@ -254,7 +255,7 @@ impl Manager {
     /// where cancelling an upscale event was done with a simple `self.highs.recv().await`,
     /// thus blocking the manager until a high event was received if there was none
     /// at the time of the call. Lesson: it is crucial that this be non-blocking.
-    pub fn flush_high_event(&self) -> Result<()> {
+    pub fn flush_high_event(&self) -> anyhow::Result<()> {
         match self.highs.try_recv() {
             Ok(high) => {
                 info!(high, action = "flushed memory.high event");
@@ -262,13 +263,15 @@ impl Manager {
             }
             Err(TryRecvError::Empty) => Ok(()), // Nothing to flush, all good
             Err(TryRecvError::Closed) => {
-                bail!("failed to flush possible outstanding high event due to closed channel")
+                anyhow::bail!(
+                    "failed to flush possible outstanding high event due to closed channel"
+                )
             }
         }
     }
 
     /// Read memory.events for the desired event type.
-    fn get_event_count(name: &str, event: MemoryEvent) -> Result<u64> {
+    fn get_event_count(name: &str, event: MemoryEvent) -> anyhow::Result<u64> {
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
         let contents = fs::read_to_string(&path).expect("failed to read memory events info");
 
@@ -287,7 +290,7 @@ impl Manager {
     }
 
     /// Retrieve whether cgroup is frozen or thawed.
-    pub fn state(&self) -> Result<FreezerState> {
+    pub fn state(&self) -> anyhow::Result<FreezerState> {
         Ok(self
             .freezer()
             .tee("failed to get freezer subsystem while attempting to get freezer state")?
@@ -296,7 +299,7 @@ impl Manager {
     }
 
     /// Get a handle on the freezer subsystem.
-    fn freezer(&self) -> Result<&FreezerController> {
+    fn freezer(&self) -> anyhow::Result<&FreezerController> {
         if let Some(Freezer(freezer)) = self
             .cgroup
             .subsystems()
@@ -305,12 +308,12 @@ impl Manager {
         {
             Ok(freezer)
         } else {
-            bail!("could not find freezer subsystem")
+            anyhow::bail!("could not find freezer subsystem")
         }
     }
 
     /// Attempt to freeze the cgroup.
-    pub fn freeze(&self) -> Result<()> {
+    pub fn freeze(&self) -> anyhow::Result<()> {
         Ok(self
             .freezer()
             .tee("failed to get freezer subsystem")?
@@ -319,7 +322,7 @@ impl Manager {
     }
 
     /// Attempt to thaw the cgroup.
-    pub fn thaw(&self) -> Result<()> {
+    pub fn thaw(&self) -> anyhow::Result<()> {
         Ok(self
             .freezer()
             .tee("failed to get freezer subsystem")?
@@ -332,7 +335,7 @@ impl Manager {
     /// Note: this method does not require `self.memory_update_lock` because
     /// getting a handle to the subsystem does not access any of the files we
     /// care about, such as memory.high and memory.events
-    fn memory(&self) -> Result<&MemController> {
+    fn memory(&self) -> anyhow::Result<&MemController> {
         if let Some(Mem(memory)) = self
             .cgroup
             .subsystems()
@@ -341,12 +344,12 @@ impl Manager {
         {
             Ok(memory)
         } else {
-            bail!("could not find memory subsystem")
+            anyhow::bail!("could not find memory subsystem")
         }
     }
 
     /// Get cgroup current memory usage.
-    pub fn current_memory_usage(&self) -> Result<u64> {
+    pub fn current_memory_usage(&self) -> anyhow::Result<u64> {
         let _lock = self.memory_update_lock.lock().unwrap();
         info!("acquired lock on cgroup memory.* files");
         Ok(self
@@ -357,7 +360,7 @@ impl Manager {
     }
 
     /// Set cgroup memory.high threshold.
-    pub fn set_high_bytes(&self, bytes: u64) -> Result<()> {
+    pub fn set_high_bytes(&self, bytes: u64) -> anyhow::Result<()> {
         let _lock = self.memory_update_lock.lock().unwrap();
         info!("acquired lock on cgroup memory.* files");
         Ok(self
@@ -373,7 +376,7 @@ impl Manager {
     }
 
     /// Set cgroup memory.high and memory.max.
-    pub fn set_limits(&self, limits: &MemoryLimits) -> Result<()> {
+    pub fn set_limits(&self, limits: &MemoryLimits) -> anyhow::Result<()> {
         let _lock = self.memory_update_lock.lock().unwrap();
         info!("acquired lock on cgroup memory.* files");
         info!(
@@ -396,7 +399,7 @@ impl Manager {
     }
 
     /// Get memory.high threshold.
-    pub fn get_high_bytes(&self) -> Result<u64> {
+    pub fn get_high_bytes(&self) -> anyhow::Result<u64> {
         let _ = self.memory_update_lock.lock();
         info!("acquired lock on cgroup memory.* files");
         let high = self
@@ -408,7 +411,7 @@ impl Manager {
         match high {
             Some(MaxValue::Max) => Ok(i64::MAX as u64),
             Some(MaxValue::Value(high)) => Ok(high as u64),
-            None => bail!("failed to read memory.high from memory subsystem"),
+            None => anyhow::bail!("failed to read memory.high from memory subsystem"),
         }
     }
 }

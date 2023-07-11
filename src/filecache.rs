@@ -2,7 +2,6 @@
 
 use crate::LogContext;
 use crate::MiB;
-use anyhow::{bail, Result};
 use tokio_postgres::Client;
 use tokio_postgres::NoTls;
 use tracing::{error, info};
@@ -67,17 +66,17 @@ impl Default for FileCacheConfig {
 
 impl FileCacheConfig {
     /// Make sure fields of the config are consistent.
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> anyhow::Result<()> {
         // Single field validity
         if !(0.0 < self.resource_multiplier && self.resource_multiplier < 1.0) {
-            bail!(
+            anyhow::bail!(
                 "resource_multiplier must be between 0.0 and 1.0 exclusive, got {}",
                 self.resource_multiplier
             )
         } else if self.spread_factor < 0.0 {
-            bail!("spread_factor must be >= 0, got {}", self.spread_factor)
+            anyhow::bail!("spread_factor must be >= 0, got {}", self.spread_factor)
         } else if self.min_remaining_after_cache == 0 {
-            bail!("min_remaining_after_cache must not be 0");
+            anyhow::bail!("min_remaining_after_cache must not be 0");
         }
 
         // Check that ResourceMultiplier and SpreadFactor are valid w.r.t. each other.
@@ -108,7 +107,7 @@ impl FileCacheConfig {
 
         let intersect_factor = self.resource_multiplier * (self.spread_factor + 1.0);
         if intersect_factor >= 1.0 {
-            bail!("incompatible ResourceMultiplier and SpreadFactor");
+            anyhow::bail!("incompatible ResourceMultiplier and SpreadFactor");
         }
         Ok(())
     }
@@ -139,7 +138,7 @@ impl FileCacheConfig {
 impl FileCacheState {
     /// Connect to the file cache.
     #[tracing::instrument]
-    pub async fn new(conn_str: &str, config: FileCacheConfig) -> Result<Self> {
+    pub async fn new(conn_str: &str, config: FileCacheConfig) -> anyhow::Result<Self> {
         let (client, conn) = tokio_postgres::connect(conn_str, NoTls)
             .await
             .tee("failed to connect to pg client")?;
@@ -158,7 +157,7 @@ impl FileCacheState {
 
     /// Get the current size of the file cache.
     #[tracing::instrument]
-    pub async fn get_file_cache_size(&self) -> Result<u64> {
+    pub async fn get_file_cache_size(&self) -> anyhow::Result<u64> {
         Ok(self
             .client
             .query_one(
@@ -177,7 +176,7 @@ impl FileCacheState {
     /// Attempt to set the file cache size, returning the size it was actually
     /// set to.
     #[tracing::instrument]
-    pub async fn set_file_cache_size(&self, num_bytes: u64) -> Result<u64> {
+    pub async fn set_file_cache_size(&self, num_bytes: u64) -> anyhow::Result<u64> {
         let max_bytes = self
             .client
             .query_one(

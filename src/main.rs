@@ -1,4 +1,3 @@
-use anyhow::Result;
 use clap::Parser;
 use tokio::net::TcpListener;
 use tracing::{error, info};
@@ -7,7 +6,7 @@ use vm_monitor::monitor::Monitor;
 use vm_monitor::Args;
 
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> anyhow::Result<()> {
     let subscriber = tracing_subscriber::fmt::Subscriber::builder()
         .json()
         .with_file(true)

@@ -1,6 +1,5 @@
 use std::{future, sync::Arc, time::Duration};
 
-use anyhow::Result;
 use async_std::channel::{Receiver, Sender};
 use tokio::{sync::oneshot, time::Instant};
 use tracing::info;
@@ -105,12 +104,12 @@ impl CgroupState {
         }
     }
 
-    pub fn get_current_memory(&self) -> Result<u64> {
+    pub fn get_current_memory(&self) -> anyhow::Result<u64> {
         self.manager.current_memory_usage()
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn set_memory_limits(&mut self, available_memory: u64) -> Result<()> {
+    pub async fn set_memory_limits(&mut self, available_memory: u64) -> anyhow::Result<()> {
         info!(
             name = self.manager.name,
             action = "setting memory limits for cgroup"
@@ -288,7 +287,7 @@ impl CgroupState {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn handle_memory_high_event(&self) -> Result<bool> {
+    pub async fn handle_memory_high_event(&self) -> anyhow::Result<bool> {
         tokio::select! {
             biased;
 
@@ -321,8 +320,7 @@ impl CgroupState {
 
         let start = Instant::now();
 
-        let must_thaw =
-            tokio::time::sleep(self.config.max_upscale_wait);
+        let must_thaw = tokio::time::sleep(self.config.max_upscale_wait);
 
         info!(
             wait = ?self.config.max_upscale_wait,
@@ -377,7 +375,7 @@ impl CgroupState {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn request_upscale(&self) -> Result<()> {
+    pub async fn request_upscale(&self) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.request_upscale_events
             .send(tx)
