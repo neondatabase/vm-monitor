@@ -11,6 +11,9 @@ use futures_util::StreamExt;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{debug, info, warn};
 
+use crate::transport::{
+    InformantMessage, InformantMessageInner, MonitorMessage, MonitorMessageInner,
+};
 use crate::{
     bridge::Dispatcher,
     cgroup::CgroupState,
@@ -18,7 +21,7 @@ use crate::{
     get_total_system_memory,
     manager::{Manager, MemoryLimits},
     mib,
-    transport::{DownscaleStatus, Packet, Request, Resources, Response, Stage},
+    transport::{Allocation, DownscaleResult},
     Args, LogContext, MiB,
 };
 
@@ -167,13 +170,13 @@ where
 
     /// Attempt to downscale filecache + cgroup
     #[tracing::instrument(skip(self))]
-    pub async fn try_downscale(&self, target: Resources) -> anyhow::Result<DownscaleStatus> {
+    pub async fn try_downscale(&self, target: Allocation) -> anyhow::Result<DownscaleResult> {
         info!(?target, action = "attempting to downscale");
 
         // Nothing to adjust
         if self.cgroup.is_none() && self.filecache.is_none() {
             info!("no action needed for downscale (no cgroup or file cache enabled)");
-            return Ok(DownscaleStatus::new(
+            return Ok(DownscaleResult::new(
                 true,
                 "monitor is not managing cgroup or file cache".to_string(),
             ));
@@ -208,7 +211,7 @@ where
 
                 info!(status, action = "discontinuing downscale");
 
-                return Ok(DownscaleStatus::new(false, status));
+                return Ok(DownscaleResult::new(false, status));
             }
         }
 
@@ -258,12 +261,12 @@ where
 
         info!(status, "downscale successful");
 
-        Ok(DownscaleStatus::new(true, status))
+        Ok(DownscaleResult::new(true, status))
     }
 
     /// Handle new resources
     #[tracing::instrument(skip(self))]
-    pub async fn handle_upscale(&self, resources: Resources) -> anyhow::Result<()> {
+    pub async fn handle_upscale(&self, resources: Allocation) -> anyhow::Result<()> {
         info!(?resources, action = "handling agent-granted upscale");
 
         if self.filecache.is_none() && self.cgroup.is_none() {
@@ -329,62 +332,42 @@ where
     #[tracing::instrument(skip(self))]
     pub async fn process_packet(
         &mut self,
-        Packet { id, stage }: Packet,
-    ) -> anyhow::Result<Option<Packet>> {
-        match stage {
-            Stage::Request(req) => match req {
-                Request::RequestUpscale {} => {
-                    unreachable!("informant should never send a Request::RequestUpscale")
-                }
-                Request::NotifyUpscale(resources) => {
-                    self.handle_upscale(resources)
-                        .await
-                        .tee("failed to handle upscale")?;
-                    let rx = self
-                        .dispatcher
-                        .notify_upscale(resources)
-                        .await
-                        .tee("failed to notify cgroup of upscale event")?;
-                    rx.await
-                        .tee("failed to confirm receipt of upscale by cgroup manager")?;
-                    info!("confirmed receipt of upscale by cgroup manager");
-                    Ok(Some(Packet::new(
-                        Stage::Response(Response::ResourceConfirmation {}),
-                        id,
-                    )))
-                }
-                Request::TryDownscale(resources) => Ok(Some(Packet::new(
-                    Stage::Response(Response::DownscaleResult(
-                        self.try_downscale(resources)
-                            .await
-                            .tee("failed to downscale")?,
-                    )),
+        InformantMessage { inner, id }: InformantMessage,
+    ) -> anyhow::Result<Option<MonitorMessage>> {
+        match inner {
+            InformantMessageInner::UpscaleNotification { granted } => {
+                self.handle_upscale(granted)
+                    .await
+                    .tee("failed to handle upscale")?;
+                let rx = self
+                    .dispatcher
+                    .notify_upscale(granted)
+                    .await
+                    .tee("failed to notify cgroup of upscale event")?;
+                rx.await
+                    .tee("failed to confirm receipt of upscale by cgroup manager")?;
+                info!("confirmed receipt of upscale by cgroup manager");
+                Ok(Some(MonitorMessage::new(
+                    MonitorMessageInner::UpscaleConfirmation { error: None },
                     id,
-                ))),
-            },
-            Stage::Response(res) => match res {
-                Response::UpscaleResult(resources) => {
-                    self.handle_upscale(resources)
+                )))
+            }
+            InformantMessageInner::DownscaleRequest { target } => Ok(Some(MonitorMessage::new(
+                MonitorMessageInner::DownscaleResult {
+                    result: self
+                        .try_downscale(target)
                         .await
-                        .tee("failed to handle upscale")?;
-                    let rx = self
-                        .dispatcher
-                        .notify_upscale(resources)
-                        .await
-                        .tee("failed to notify cgroup of upscale event")?;
-                    rx.await
-                        .tee("confirmed receipt of upscale by cgroup manager")?;
-                    info!("confirmed receipt of requested upscale by cgroup manager");
-                    Ok(Some(Packet::new(Stage::Done {}, id)))
-                }
-                Response::ResourceConfirmation {} => {
-                    unreachable!("informant should never receive a Response::ResourceConfirmation")
-                }
-                Response::DownscaleResult(_) => {
-                    unreachable!("informant should never receive a Response::DownscaleResult")
-                }
-            },
-            Stage::Done {} => Ok(None), // yay! :)
+                        .tee("failed to downscale")?,
+                },
+                id,
+            ))),
+            InformantMessageInner::InvalidMessage { error } => {
+                warn!(
+                    error,
+                    id, "received notification of an message packet we sent"
+                );
+                Ok(None)
+            }
         }
     }
 
@@ -401,7 +384,7 @@ where
                             info!("cgroup asking for upscale; forwarding request");
                             self.counter += 1;
                             self.dispatcher
-                                .send(Packet::new(Stage::Request(Request::RequestUpscale {}), self.counter))
+                                .send(MonitorMessage::new(MonitorMessageInner::UpscaleRequest {}, self.counter))
                                 .await
                                 .tee("failed to send packet")?;
                             if let Err(_) = sender.send(()) {
@@ -422,7 +405,7 @@ where
                                 // We only want to borrow self for as short a time as possible
                                 // and a closure borrows self for it's entire lifetime - which
                                 // is too long and prevents reading/writing the stream.
-                                let packet: Packet = match msg {
+                                let packet: InformantMessage = match msg {
                                     tokio_tungstenite::tungstenite::Message::Text(text) => {
                                         serde_json::from_str(&text).unwrap()
                                     }

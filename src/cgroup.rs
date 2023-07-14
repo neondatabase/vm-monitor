@@ -7,7 +7,7 @@ use tracing::info;
 use crate::{
     manager::{Manager, MemoryLimits},
     mib,
-    transport::Resources,
+    transport::Allocation,
     LogContext, MiB,
 };
 
@@ -17,7 +17,7 @@ pub struct CgroupState {
     pub(crate) config: CgroupConfig,
 
     // For communication with dispatcher
-    notify_upscale_events: Receiver<(Resources, oneshot::Sender<()>)>,
+    notify_upscale_events: Receiver<(Allocation, oneshot::Sender<()>)>,
     request_upscale_events: Sender<oneshot::Sender<()>>,
 }
 
@@ -93,7 +93,7 @@ impl CgroupState {
     pub fn new(
         manager: Manager,
         config: CgroupConfig,
-        notify_upscale_events: Receiver<(Resources, oneshot::Sender<()>)>,
+        notify_upscale_events: Receiver<(Allocation, oneshot::Sender<()>)>,
         request_upscale_events: Sender<oneshot::Sender<()>>,
     ) -> Self {
         Self {

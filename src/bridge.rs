@@ -23,7 +23,7 @@ pub struct Dispatcher<S> {
     pub(crate) source: SplitStream<WebSocketStream<S>>,
     sink: SplitSink<WebSocketStream<S>, Message>,
 
-    pub(crate) notify_upscale_events: Sender<(Resources, oneshot::Sender<()>)>,
+    pub(crate) notify_upscale_events: Sender<(Allocation, oneshot::Sender<()>)>,
     pub(crate) request_upscale_events: Receiver<oneshot::Sender<()>>, // TODO: if needed, make state some arc mutex thing or an atomic
 }
 
@@ -33,7 +33,7 @@ where
 {
     pub async fn new(
         stream: S,
-        notify_upscale_events: Sender<(Resources, oneshot::Sender<()>)>,
+        notify_upscale_events: Sender<(Allocation, oneshot::Sender<()>)>,
         request_upscale_events: Receiver<oneshot::Sender<()>>,
     ) -> anyhow::Result<Self> {
         let (sink, source) = accept_async(stream)
@@ -52,7 +52,7 @@ where
     /// that the cgroup will send to as a form of acknowledging the upscale.
     pub async fn notify_upscale(
         &self,
-        resources: Resources,
+        resources: Allocation,
     ) -> anyhow::Result<oneshot::Receiver<()>> {
         let (tx, rx) = oneshot::channel();
         self.notify_upscale_events
@@ -65,9 +65,9 @@ where
     /// Mainly here so we only send actual data. Otherwise, it would be easy to
     /// accidentally serialize something else and send it.
     #[tracing::instrument(skip(self))]
-    pub async fn send(&mut self, p: Packet) -> anyhow::Result<()> {
-        debug!(packet = ?p, action = "sending packet");
-        let json = serde_json::to_string(&p).tee("failed to serialize packet")?;
+    pub async fn send(&mut self, message: MonitorMessage) -> anyhow::Result<()> {
+        debug!(?message, action = "sending packet");
+        let json = serde_json::to_string(&message).tee("failed to serialize packet")?;
         Ok(self
             .sink
             .send(Message::Text(json))

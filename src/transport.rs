@@ -28,81 +28,53 @@
 
 use serde::{Deserialize, Serialize};
 
-/// The `Packet` is the singular message typed passed over the websocket connection
-/// to the informant.
 #[derive(Serialize, Deserialize, Debug)]
-pub struct Packet {
-    pub stage: Stage,
-
-    /// Used to identify packets that are part of the same transaction. If the
-    /// informant sends a TryDownscale, the monitor should return a response with
-    /// the same id so the informant knows when the response to that particular
-    /// downscale request has been made.
-    pub id: usize,
+#[serde(rename_all = "camelCase")]
+pub struct MonitorMessage {
+    pub(crate) inner: MonitorMessageInner,
+    pub(crate) id: usize,
 }
 
-impl Packet {
-    pub fn new(stage: Stage, id: usize) -> Self {
-        Self { stage, id }
+impl MonitorMessage {
+    pub fn new(inner: MonitorMessageInner, id: usize) -> Self {
+        return Self { inner, id };
     }
 }
 
-/// Communication between monitor and informant happens in three steps.
-/// 1. One party sends the other a `Packet` containing a `Request`
-/// 2. The other party performs some action to generate a `Response`, which
-///    it sends back.
-/// 3. The original sender sends back a `Done` upon receiving the response.
-///
-/// *Note*: there is one special case: when the monitor sends a `RequestUpscale`.
-/// The informant will immediately respond with a `Done`. If the agent decides to
-/// upscale, we will get notified with an UpscaleResult.
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub enum Stage {
-    /// The initial communication in an interaction between informant/monitor.
-    Request(Request),
-
-    /// The second interaction in any communication.
-    Response(Response),
-
-    /// Final acnowledgement that a transaction is complete. Mostly for debugging
-    /// purposes. Kept as a struct variant because on the go side it's represented
-    /// as a struct{}, which go serializes as `{}`.
-    Done {},
+#[serde(tag = "type")]
+pub enum MonitorMessageInner {
+    InvalidMessage { error: String },
+    // This is a struct variant because of the way go serializes struct{}
+    UpscaleConfirmation { error: Option<String> },
+    UpscaleRequest {},
+    DownscaleResult { result: DownscaleResult }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub enum Request {
-    // Monitor initiated
-    RequestUpscale {}, // We need {} because of the way go serializes struct{}
-
-    // Informant initiated
-    NotifyUpscale(Resources),
-    TryDownscale(Resources),
+pub struct InformantMessage {
+    pub(crate) inner: InformantMessageInner,
+    pub(crate) id: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
-pub enum Response {
-    // Informant sent
-    UpscaleResult(Resources),
-
-    // Monitor sent
-    ResourceConfirmation {}, // We need {} because of the way go serializes struct{}
-    DownscaleResult(DownscaleStatus),
+#[serde(tag = "type")]
+pub enum InformantMessageInner {
+    InvalidMessage { error: String },
+    UpscaleNotification { granted: Allocation },
+    DownscaleRequest { target: Allocation },
 }
 
-/// Represents a specification for a VM's usage - whether it be its allowed
-/// allocation of resources or a desired allocation it should attempt to downscale
-/// to.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-pub struct Resources {
+pub struct Allocation {
     pub(crate) cpu: u64,
     pub(crate) mem: u64,
 }
 
-impl Resources {
+impl Allocation {
     pub fn new(cpu: u64, mem: u64) -> Self {
         Self { cpu, mem }
     }
@@ -110,12 +82,12 @@ impl Resources {
 
 /// The status returned after handling a TryDownscale request
 #[derive(Serialize, Deserialize, Debug)]
-pub struct DownscaleStatus {
+pub struct DownscaleResult {
     ok: bool,
     status: String,
 }
 
-impl DownscaleStatus {
+impl DownscaleResult {
     pub fn new(ok: bool, status: String) -> Self {
         Self { ok, status }
     }
