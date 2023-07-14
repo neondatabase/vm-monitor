@@ -46,10 +46,11 @@ impl MonitorMessage {
 #[serde(tag = "type")]
 pub enum MonitorMessageInner {
     InvalidMessage { error: String },
-    // This is a struct variant because of the way go serializes struct{}
+    // TODO: make sending erors more general so that this is just empty
     UpscaleConfirmation { error: Option<String> },
+    // This is a struct variant because of the way go serializes struct{}
     UpscaleRequest {},
-    DownscaleResult { result: DownscaleResult }
+    DownscaleResult { ok: bool, status: String },
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -77,18 +78,5 @@ pub struct Allocation {
 impl Allocation {
     pub fn new(cpu: u64, mem: u64) -> Self {
         Self { cpu, mem }
-    }
-}
-
-/// The status returned after handling a TryDownscale request
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DownscaleResult {
-    ok: bool,
-    status: String,
-}
-
-impl DownscaleResult {
-    pub fn new(ok: bool, status: String) -> Self {
-        Self { ok, status }
     }
 }

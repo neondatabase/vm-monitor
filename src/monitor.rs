@@ -21,7 +21,7 @@ use crate::{
     get_total_system_memory,
     manager::{Manager, MemoryLimits},
     mib,
-    transport::{Allocation, DownscaleResult},
+    transport::Allocation,
     Args, LogContext, MiB,
 };
 
@@ -170,13 +170,13 @@ where
 
     /// Attempt to downscale filecache + cgroup
     #[tracing::instrument(skip(self))]
-    pub async fn try_downscale(&self, target: Allocation) -> anyhow::Result<DownscaleResult> {
+    pub async fn try_downscale(&self, target: Allocation) -> anyhow::Result<(bool, String)> {
         info!(?target, action = "attempting to downscale");
 
         // Nothing to adjust
         if self.cgroup.is_none() && self.filecache.is_none() {
             info!("no action needed for downscale (no cgroup or file cache enabled)");
-            return Ok(DownscaleResult::new(
+            return Ok((
                 true,
                 "monitor is not managing cgroup or file cache".to_string(),
             ));
@@ -211,7 +211,7 @@ where
 
                 info!(status, action = "discontinuing downscale");
 
-                return Ok(DownscaleResult::new(false, status));
+                return Ok((false, status));
             }
         }
 
@@ -261,7 +261,7 @@ where
 
         info!(status, "downscale successful");
 
-        Ok(DownscaleResult::new(true, status))
+        Ok((true, status))
     }
 
     /// Handle new resources
@@ -352,15 +352,16 @@ where
                     id,
                 )))
             }
-            InformantMessageInner::DownscaleRequest { target } => Ok(Some(MonitorMessage::new(
-                MonitorMessageInner::DownscaleResult {
-                    result: self
-                        .try_downscale(target)
-                        .await
-                        .tee("failed to downscale")?,
-                },
-                id,
-            ))),
+            InformantMessageInner::DownscaleRequest { target } => {
+                let (ok, status) = self
+                    .try_downscale(target)
+                    .await
+                    .tee("failed to downscale")?;
+                Ok(Some(MonitorMessage::new(
+                    MonitorMessageInner::DownscaleResult { ok, status },
+                    id,
+                )))
+            }
             InformantMessageInner::InvalidMessage { error } => {
                 warn!(
                     error,
