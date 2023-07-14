@@ -37,7 +37,7 @@ pub struct MonitorMessage {
 
 impl MonitorMessage {
     pub fn new(inner: MonitorMessageInner, id: usize) -> Self {
-        return Self { inner, id };
+        Self { inner, id }
     }
 }
 

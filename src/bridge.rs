@@ -68,10 +68,10 @@ where
     pub async fn send(&mut self, message: MonitorMessage) -> anyhow::Result<()> {
         debug!(?message, action = "sending packet");
         let json = serde_json::to_string(&message).tee("failed to serialize packet")?;
-        Ok(self
+        self
             .sink
             .send(Message::Text(json))
             .await
-            .tee("stream error sending message")?)
+            .tee("stream error sending message")
     }
 }

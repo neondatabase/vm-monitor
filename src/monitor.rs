@@ -388,7 +388,7 @@ where
                                 .send(MonitorMessage::new(MonitorMessageInner::UpscaleRequest {}, self.counter))
                                 .await
                                 .tee("failed to send packet")?;
-                            if let Err(_) = sender.send(()) {
+                            if sender.send(()).is_err() {
                                 warn!("error sending confirmation of upscale request to cgroup");
                             };
                         },

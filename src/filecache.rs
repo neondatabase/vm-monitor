@@ -158,7 +158,7 @@ impl FileCacheState {
     /// Get the current size of the file cache.
     #[tracing::instrument]
     pub async fn get_file_cache_size(&self) -> anyhow::Result<u64> {
-        Ok(self
+        self
             .client
             .query_one(
                 "SELECT pg_size_bytes(current_setting('neon.file_cache_size_limit'));",
@@ -170,7 +170,7 @@ impl FileCacheState {
             .try_get::<_, i64>(0)
             // Since the size of the table is not negative, the cast is sound.
             .map(|bytes| bytes as u64)
-            .tee("failed to extract file cache size from query result")?)
+            .tee("failed to extract file cache size from query result")
     }
 
     /// Attempt to set the file cache size, returning the size it was actually

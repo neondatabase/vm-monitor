@@ -106,7 +106,7 @@ pub struct MemoryLimits {
 
 impl MemoryLimits {
     pub fn new(high: u64, max: u64) -> Self {
-        return Self { max, high };
+        Self { max, high }
     }
 }
 
@@ -279,23 +279,23 @@ impl Manager {
         // low 42
         // high 101
         // ...
-        Ok(contents
+        contents
             .lines()
             .filter_map(|s| s.split_once(' '))
             .find(|(e, _)| *e == event.to_string())
             .map(|(_, count)| count.parse::<u64>())
             .ok_or(anyhow!("error getting memory.high event count"))
             .with_tee(|| format!("failed to find entry for memory.high events in {path}"))?
-            .tee("failed to parse memory.high as u64")?)
+            .tee("failed to parse memory.high as u64")
     }
 
     /// Retrieve whether cgroup is frozen or thawed.
     pub fn state(&self) -> anyhow::Result<FreezerState> {
-        Ok(self
+        self
             .freezer()
             .tee("failed to get freezer subsystem while attempting to get freezer state")?
             .state()
-            .tee("failed to get freezer state")?)
+            .tee("failed to get freezer state")
     }
 
     /// Get a handle on the freezer subsystem.
@@ -314,20 +314,20 @@ impl Manager {
 
     /// Attempt to freeze the cgroup.
     pub fn freeze(&self) -> anyhow::Result<()> {
-        Ok(self
+        self
             .freezer()
             .tee("failed to get freezer subsystem")?
             .freeze()
-            .tee("failed to freeze")?)
+            .tee("failed to freeze")
     }
 
     /// Attempt to thaw the cgroup.
     pub fn thaw(&self) -> anyhow::Result<()> {
-        Ok(self
+        self
             .freezer()
             .tee("failed to get freezer subsystem")?
             .thaw()
-            .tee("failed to thaw")?)
+            .tee("failed to thaw")
     }
 
     /// Get a handle on the memory subsystem.
@@ -363,7 +363,7 @@ impl Manager {
     pub fn set_high_bytes(&self, bytes: u64) -> anyhow::Result<()> {
         let _lock = self.memory_update_lock.lock().unwrap();
         info!("acquired lock on cgroup memory.* files");
-        Ok(self
+        self
             .memory()
             .tee("failed to get memory subsystem")?
             .set_mem(cgroups_rs::memory::SetMemory {
@@ -372,7 +372,7 @@ impl Manager {
                 min: None,
                 max: None,
             })
-            .tee("failed to set memory.high")?)
+            .tee("failed to set memory.high")
     }
 
     /// Set cgroup memory.high and memory.max.
@@ -384,7 +384,7 @@ impl Manager {
             limits.max,
             action = "writing new memory limits",
         );
-        Ok(self
+        self
             .memory()
             .tee("failed to get memory subsystem while setting memory limits")?
             .set_mem(cgroups_rs::memory::SetMemory {
@@ -395,7 +395,7 @@ impl Manager {
                 )),
                 max: Some(MaxValue::Value(u64::min(limits.max, i64::MAX as u64) as i64)),
             })
-            .tee("failed to set memory limits")?)
+            .tee("failed to set memory limits")
     }
 
     /// Get memory.high threshold.

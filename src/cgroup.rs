@@ -163,7 +163,7 @@ impl CgroupState {
                                 info!(?resources, "cgroup manager confirming upscale");
                                 // Report back that we're done handling the event.
                                 // This is *important* as the dispatcher is waiting on hearing back!
-                                if let Err(_) = tx.send(()) {
+                                if tx.send(()).is_err() {
                                     panic!("error confirming receipt of upscale");
                                 }
                             }
@@ -202,7 +202,7 @@ impl CgroupState {
                                                 Ok((_, tx)) => {
                                                     // Report back that we're done handling the event.
                                                     // This is *important* as the dispatcher is waiting on hearing back!
-                                                    if let Err(_) = tx.send(()) {
+                                                    if tx.send(()).is_err() {
                                                         panic!("error confirming receipt of upscale");
                                                     }
                                                 }
@@ -234,7 +234,7 @@ impl CgroupState {
                                                         Ok((_, tx)) => {
                                                             // Report back that we're done handling the event.
                                                             // This is *important* as the dispatcher is waiting on hearing back!
-                                                            if let Err(_) = tx.send(()) {
+                                                            if tx.send(()).is_err() {
                                                                 panic!("error confirming receipt of upscale");
                                                             }
                                                         }
@@ -297,7 +297,7 @@ impl CgroupState {
                     Ok((_, tx)) => {
                         // Report back that we're done handling the event.
                         // This is *important* as the dispatcher is waiting on hearing back!
-                        if let Err(_) = tx.send(()) {
+                        if tx.send(()).is_err() {
                             panic!("error confirming receipt of upscale");
                         }
                     }
@@ -347,7 +347,7 @@ impl CgroupState {
                     Ok((_, tx)) => {
                         // Report back that we're done handling the event.
                         // This is *important* as the dispatcher is waiting on hearing back!
-                        if let Err(_) = tx.send(()) {
+                        if tx.send(()).is_err() {
                             panic!("error confirming receipt of upscale");
                         }
                     }
@@ -371,7 +371,7 @@ impl CgroupState {
 
         self.manager.flush_high_event()?;
 
-        return Ok(!upscaled);
+        Ok(!upscaled)
     }
 
     #[tracing::instrument(skip(self))]

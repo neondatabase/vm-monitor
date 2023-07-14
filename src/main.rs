@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Err(e) => {
             error!(error = ?e, "Monitor terminated on {e}");
-            return Err(e);
+            Err(e)
         }
     }
 }
