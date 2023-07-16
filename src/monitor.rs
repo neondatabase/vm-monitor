@@ -408,10 +408,10 @@ where
                                 // is too long and prevents reading/writing the stream.
                                 let packet: InformantMessage = match msg {
                                     tokio_tungstenite::tungstenite::Message::Text(text) => {
-                                        serde_json::from_str(&text).unwrap()
+                                        serde_json::from_str(&text).tee("failed to desreialize text message")?
                                     }
                                     tokio_tungstenite::tungstenite::Message::Binary(bin) => {
-                                        serde_json::from_slice(&bin).unwrap()
+                                        serde_json::from_slice(&bin).tee("failed to deserialize binary message")?
                                     }
                                     _ => continue,
                                 };
