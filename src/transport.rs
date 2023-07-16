@@ -29,8 +29,8 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
 pub struct MonitorMessage {
+    #[serde(flatten)]
     pub(crate) inner: MonitorMessageInner,
     pub(crate) id: usize,
 }
@@ -42,7 +42,6 @@ impl MonitorMessage {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
 #[serde(tag = "type")]
 pub enum MonitorMessageInner {
     InvalidMessage { error: String },
@@ -54,15 +53,14 @@ pub enum MonitorMessageInner {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
 pub struct InformantMessage {
+    #[serde(flatten)]
     pub(crate) inner: InformantMessageInner,
     pub(crate) id: usize,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "camelCase")]
-#[serde(tag = "type")]
+#[serde(tag = "type", content = "content")]
 pub enum InformantMessageInner {
     InvalidMessage { error: String },
     UpscaleNotification { granted: Allocation },
