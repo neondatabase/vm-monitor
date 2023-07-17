@@ -18,4 +18,8 @@ In practice, usage of the monitor involves much more integration with the rest o
 autoscaling system. However, running the monitor standalone can be useful for testing
 it.
 
+# TODOs
+[ ]: rewrite internals to put all signals on a channel instead of using selects
+[ ]: merge `transport.rs` and `protocol.rs`
+
 [autoscaling]: https://github.com/neondatabase/autoscaling
