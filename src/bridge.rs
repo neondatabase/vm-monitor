@@ -50,7 +50,7 @@ where
         let proto_bounds = if let Some(bounds) = source.next().await {
             let bounds = bounds.tee("failed to read bounds off connection")?;
             if let Message::Text(bounds) = bounds {
-                debug!(bounds, "received bounds message");
+                info!(bounds, "received bounds message");
                 assert!(PROTOCOL_MIN_VERSION <= PROTOCOL_MAX_VERSION);
                 let monitor_bounds: ProtocolBounds =
                     ProtocolBounds::new(PROTOCOL_MIN_VERSION, PROTOCOL_MAX_VERSION).unwrap();
