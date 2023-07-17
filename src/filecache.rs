@@ -158,8 +158,7 @@ impl FileCacheState {
     /// Get the current size of the file cache.
     #[tracing::instrument]
     pub async fn get_file_cache_size(&self) -> anyhow::Result<u64> {
-        self
-            .client
+        self.client
             .query_one(
                 "SELECT pg_size_bytes(current_setting('neon.file_cache_size_limit'));",
                 &[],

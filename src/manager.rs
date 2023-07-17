@@ -291,8 +291,7 @@ impl Manager {
 
     /// Retrieve whether cgroup is frozen or thawed.
     pub fn state(&self) -> anyhow::Result<FreezerState> {
-        self
-            .freezer()
+        self.freezer()
             .tee("failed to get freezer subsystem while attempting to get freezer state")?
             .state()
             .tee("failed to get freezer state")
@@ -314,8 +313,7 @@ impl Manager {
 
     /// Attempt to freeze the cgroup.
     pub fn freeze(&self) -> anyhow::Result<()> {
-        self
-            .freezer()
+        self.freezer()
             .tee("failed to get freezer subsystem")?
             .freeze()
             .tee("failed to freeze")
@@ -323,8 +321,7 @@ impl Manager {
 
     /// Attempt to thaw the cgroup.
     pub fn thaw(&self) -> anyhow::Result<()> {
-        self
-            .freezer()
+        self.freezer()
             .tee("failed to get freezer subsystem")?
             .thaw()
             .tee("failed to thaw")
@@ -363,8 +360,7 @@ impl Manager {
     pub fn set_high_bytes(&self, bytes: u64) -> anyhow::Result<()> {
         let _lock = self.memory_update_lock.lock().unwrap();
         info!("acquired lock on cgroup memory.* files");
-        self
-            .memory()
+        self.memory()
             .tee("failed to get memory subsystem")?
             .set_mem(cgroups_rs::memory::SetMemory {
                 low: None,
@@ -384,8 +380,7 @@ impl Manager {
             limits.max,
             action = "writing new memory limits",
         );
-        self
-            .memory()
+        self.memory()
             .tee("failed to get memory subsystem while setting memory limits")?
             .set_mem(cgroups_rs::memory::SetMemory {
                 min: None,
