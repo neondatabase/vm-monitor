@@ -14,11 +14,12 @@ use tokio::{
     sync::oneshot,
 };
 use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::{
     protocol::{
-        ProtocolBounds, ProtocolVersion, ProtocolResponse, PROTOCOL_MAX_VERSION, PROTOCOL_MIN_VERSION,
+        ProtocolBounds, ProtocolResponse, ProtocolVersion, PROTOCOL_MAX_VERSION,
+        PROTOCOL_MIN_VERSION,
     },
     transport::*,
     LogContext,
