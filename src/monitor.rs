@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::{fmt::Debug, mem};
 
 use async_std::channel;
+use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
-use tokio::io::{AsyncRead, AsyncWrite};
 use tracing::{debug, info, warn};
 
 use crate::transport::{
@@ -28,12 +28,12 @@ use crate::{
 /// Central struct that interacts with informant, dispatcher, and cgroup to handle
 /// signals from the informant.
 #[derive(Debug)]
-pub struct Monitor<S> {
+pub struct Monitor {
     config: MonitorConfig,
     filecache: Option<FileCacheState>,
     // TODO: flip it inside out to Arc<Option>?
     cgroup: Option<Arc<CgroupState>>,
-    dispatcher: Dispatcher<S>,
+    dispatcher: Dispatcher,
 
     /// We "mint" new package ids by incrementing this counter and taking the value.
     counter: usize,
@@ -65,13 +65,10 @@ impl Default for MonitorConfig {
     }
 }
 
-impl<S> Monitor<S>
-where
-    S: AsyncRead + AsyncWrite + Unpin + Send + Debug + 'static,
-{
+impl Monitor {
     /// Create a new monitor.
-    #[tracing::instrument]
-    pub async fn new(config: MonitorConfig, args: Args, stream: S) -> anyhow::Result<Self> {
+    #[tracing::instrument(skip(ws))]
+    pub async fn new(config: MonitorConfig, args: Args, ws: WebSocket) -> anyhow::Result<Self> {
         if config.sys_buffer_bytes == 0 {
             anyhow::bail!("invalid MonitorConfig: ssy_buffer_bytes cannot be 0")
         }
@@ -82,7 +79,7 @@ where
         let (notified_send, notified_recv) = channel::unbounded();
         let (requesting_send, requesting_recv) = channel::unbounded();
 
-        let dispatcher = Dispatcher::new(stream, notified_send, requesting_recv)
+        let dispatcher = Dispatcher::new(ws, notified_send, requesting_recv)
             .await
             .tee("error creating new dispatcher")?;
 
@@ -409,10 +406,10 @@ where
                                 // and a closure borrows self for it's entire lifetime - which
                                 // is too long and prevents reading/writing the stream.
                                 let packet: InformantMessage = match msg {
-                                    tokio_tungstenite::tungstenite::Message::Text(text) => {
+                                    Message::Text(text) => {
                                         serde_json::from_str(&text).tee("failed to deserialize text message")?
                                     }
-                                    tokio_tungstenite::tungstenite::Message::Binary(bin) => {
+                                    Message::Binary(bin) => {
                                         serde_json::from_slice(&bin).tee("failed to deserialize binary message")?
                                     }
                                     _ => continue,

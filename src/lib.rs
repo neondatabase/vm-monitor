@@ -5,7 +5,7 @@ use sysinfo::{RefreshKind, System, SystemExt};
 use tap::TapFallible;
 use tracing::error;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 pub struct Args {
     #[arg(short, long)]
     cgroup: Option<String>,

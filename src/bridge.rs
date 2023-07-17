@@ -5,15 +5,13 @@
 //! way to process and send packets in a straightforward way.
 
 use async_std::channel::{Receiver, Sender};
+use axum::extract::ws::{Message, WebSocket};
 use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::oneshot,
-};
-use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
+use tokio::sync::oneshot;
+// use tokio_tungstenite::{accept_async, tungstenite::Message, WebSocketStream};
 use tracing::{debug, info};
 
 use crate::{
@@ -26,28 +24,23 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct Dispatcher<S> {
-    pub(crate) source: SplitStream<WebSocketStream<S>>,
-    sink: SplitSink<WebSocketStream<S>, Message>,
+pub struct Dispatcher {
+    pub(crate) source: SplitStream<WebSocket>,
+    sink: SplitSink<WebSocket, Message>,
 
     pub(crate) notify_upscale_events: Sender<(Allocation, oneshot::Sender<()>)>,
     pub(crate) request_upscale_events: Receiver<oneshot::Sender<()>>, // TODO: if needed, make state some arc mutex thing or an atomic
     pub(crate) proto_version: ProtocolVersion,
 }
 
-impl<S> Dispatcher<S>
-where
-    S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-{
+impl Dispatcher {
     pub async fn new(
-        stream: S,
+        stream: WebSocket,
         notify_upscale_events: Sender<(Allocation, oneshot::Sender<()>)>,
         request_upscale_events: Receiver<oneshot::Sender<()>>,
     ) -> anyhow::Result<Self> {
-        let (mut sink, mut source) = accept_async(stream)
-            .await
-            .tee("failed to connect to stream")?
-            .split();
+        let (mut sink, mut source) = stream.split();
+        info!("waiting for informant to send protocol range");
         let proto_bounds = if let Some(bounds) = source.next().await {
             let bounds = bounds.tee("failed to read bounds off connection")?;
             if let Message::Text(bounds) = bounds {
