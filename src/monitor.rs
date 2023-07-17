@@ -365,7 +365,7 @@ where
             InformantMessageInner::InvalidMessage { error } => {
                 warn!(
                     error,
-                    id, "received notification of an message packet we sent"
+                    id, "received notification of an invalid message we sent"
                 );
                 Ok(None)
             }
@@ -408,7 +408,7 @@ where
                                 // is too long and prevents reading/writing the stream.
                                 let packet: InformantMessage = match msg {
                                     tokio_tungstenite::tungstenite::Message::Text(text) => {
-                                        serde_json::from_str(&text).tee("failed to desreialize text message")?
+                                        serde_json::from_str(&text).tee("failed to deserialize text message")?
                                     }
                                     tokio_tungstenite::tungstenite::Message::Binary(bin) => {
                                         serde_json::from_slice(&bin).tee("failed to deserialize binary message")?
@@ -424,19 +424,15 @@ where
                                     continue
                                 };
 
-                                // Technically doesn't need a block, but just putting one for
-                                // clarity since the borrowing in this section is tricky
-                                {
-                                    self.dispatcher
-                                        .send(out)
-                                        .await
-                                        .tee("failed to send packet")?;
-                                }
+                                self.dispatcher
+                                    .send(out)
+                                    .await
+                                    .tee("failed to send packet")?;
                             }
                             Err(e) => warn!("{e}"),
                         }
                     } else {
-                        anyhow::bail!("connection closed")
+                        anyhow::bail!("dispatcher connection closed")
                     }
                 }
             }
