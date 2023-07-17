@@ -34,6 +34,8 @@ pub struct Monitor<S> {
     // TODO: flip it inside out to Arc<Option>?
     cgroup: Option<Arc<CgroupState>>,
     dispatcher: Dispatcher<S>,
+
+    /// We "mint" new package ids by incrementing this counter and taking the value.
     counter: usize,
 }
 
