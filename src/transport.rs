@@ -69,12 +69,12 @@ pub enum InformantMessageInner {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct Allocation {
-    pub(crate) cpu: u64,
+    pub(crate) cpu: f64,
     pub(crate) mem: u64,
 }
 
 impl Allocation {
-    pub fn new(cpu: u64, mem: u64) -> Self {
+    pub fn new(cpu: f64, mem: u64) -> Self {
         Self { cpu, mem }
     }
 }
