@@ -2,11 +2,13 @@ use core::fmt;
 use std::cmp;
 
 use serde::{Deserialize, Serialize};
+use serde_repr::{Deserialize_repr, Serialize_repr};
 
 pub const PROTOCOL_MIN_VERSION: ProtocolVersion = ProtocolVersion::V1_0;
 pub const PROTOCOL_MAX_VERSION: ProtocolVersion = ProtocolVersion::V1_0;
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Serialize_repr, Deserialize_repr)]
+#[repr(u8)]
 pub enum ProtocolVersion {
     /// Represents v1.0 of the informant<-> monitor protocol - the initial version
     V1_0 = 1,
