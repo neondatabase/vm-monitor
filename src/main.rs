@@ -44,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/monitor", get(ws_handler))
         .with_state(Arc::new(AtomicBool::new(false)));
 
-    let addr = "0.0.0.0:10369";
+    let addr = "127.0.0.1:10369";
     Server::try_bind(&addr.parse().expect("parsing address should not fail"))
         .with_context(|| format!("failed to bind to {addr}"))?
         .serve(app.into_make_service())
