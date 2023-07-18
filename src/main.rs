@@ -3,13 +3,14 @@ use std::sync::{
     Arc,
 };
 
+use anyhow::Context;
 use axum::{
     body::Full,
     extract::{ws::WebSocket, State, WebSocketUpgrade},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
-    Router,
+    Router, Server,
 };
 use clap::Parser;
 use tracing::{info, warn};
@@ -43,10 +44,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/monitor", get(ws_handler))
         .with_state(Arc::new(AtomicBool::new(false)));
 
-    axum::Server::bind(&"0.0.0.0:10369".parse().unwrap())
+    let addr = "0.0.0.0:10369";
+    Server::try_bind(&addr.parse().expect("parsing address should not fail"))
+        .with_context(|| format!("failed to bind to {addr}"))?
         .serve(app.into_make_service())
         .await
-        .unwrap();
+        .context("server exited")?;
 
     Ok(())
 }
