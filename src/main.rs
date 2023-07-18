@@ -29,15 +29,17 @@ async fn main() -> anyhow::Result<()> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let app = Router::new()
-        .route(
-            "/register",
-            get(|| async {
-                Response::builder()
-                    .status(StatusCode::NOT_FOUND)
-                    .body(Full::from("connect to the monitor via ws on /monitor"))
-                    .unwrap()
-            }),
-        )
+        // Current, the informant exposes a /register endpoint. At the time of
+        // writing, we need to support both agent->informant->monitor and
+        // agent->monitor systems due to old vms. For new deploys with just the
+        // monitor, the agent can still hit the /register endpoint. If it gets
+        // a 404 back, it'll know to git the /monitor endpoint and normal
+        // functioning can follow.
+        .route("/register", get(register))
+        // This route gets upgraded to a websocket connection. We only support
+        // connection at a time. We enforce this using global app state.
+        // True indicates we are connected to someone and False indicates we can
+        // receive connections.
         .route("/monitor", get(ws_handler))
         .with_state(Arc::new(AtomicBool::new(false)));
 
@@ -49,10 +51,21 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Always returns a 404 to signal to agents that they should connect on the
+/// /monitor endpoint
+#[tracing::instrument(name = "/register")]
+async fn register() -> Response {
+    Response::builder()
+        .status(StatusCode::NOT_FOUND)
+        .body(Full::from("connect to the monitor via ws on /monitor"))
+        .unwrap()
+        .into_response()
+}
+
 /// Handles incoming websocket connections. If we are already to connected to
 /// an informant, returns a 409 (conflict) response, as only one informant can
 /// be instructing is on what do at a time. Otherwise, starts the monitor.
-#[tracing::instrument(skip(ws))]
+#[tracing::instrument(name = "/monitor", skip(ws))]
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AtomicBool>>) -> Response {
     if !state.fetch_or(true, Ordering::AcqRel) {
         info!("receiving websocket connection");
