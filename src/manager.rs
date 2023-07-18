@@ -347,21 +347,28 @@ impl Manager {
 
     /// Get cgroup current memory usage.
     pub fn current_memory_usage(&self) -> anyhow::Result<u64> {
+        // Get the subsystem first to avoid hold the lock for longer than necessary
+        let memory = self.memory().tee("failed to get memory subsystem")?;
+
         let _lock = self.memory_update_lock.lock().unwrap();
-        info!("acquired lock on cgroup memory.* files");
-        Ok(self
-            .memory()
-            .tee("failed to get memory subsystem")?
-            .memory_stat()
-            .usage_in_bytes)
+        info!(
+            action = "getting current memory usage",
+            "acquired lock on cgroup memory.* files"
+        );
+        Ok(memory.memory_stat().usage_in_bytes)
     }
 
     /// Set cgroup memory.high threshold.
     pub fn set_high_bytes(&self, bytes: u64) -> anyhow::Result<()> {
+        // Get the subsystem first to avoid hold the lock for longer than necessary
+        let memory = self.memory().tee("failed to get memory subsystem")?;
+
         let _lock = self.memory_update_lock.lock().unwrap();
-        info!("acquired lock on cgroup memory.* files");
-        self.memory()
-            .tee("failed to get memory subsystem")?
+        info!(
+            action = "setting memory.high",
+            "acquired lock on cgroup memory.* files"
+        );
+        memory
             .set_mem(cgroups_rs::memory::SetMemory {
                 low: None,
                 high: Some(MaxValue::Value(bytes.max(i64::MAX as u64) as i64)),
@@ -373,15 +380,22 @@ impl Manager {
 
     /// Set cgroup memory.high and memory.max.
     pub fn set_limits(&self, limits: &MemoryLimits) -> anyhow::Result<()> {
+        // Get the subsystem first to avoid hold the lock for longer than necessary
+        let memory = self
+            .memory()
+            .tee("failed to get memory subsystem while setting memory limits")?;
+
         let _lock = self.memory_update_lock.lock().unwrap();
-        info!("acquired lock on cgroup memory.* files");
+        info!(
+            action = "setting memory.{high, max}",
+            "acquired lock on cgroup memory.* files"
+        );
         info!(
             limits.high,
             limits.max,
             action = "writing new memory limits",
         );
-        self.memory()
-            .tee("failed to get memory subsystem while setting memory limits")?
+        memory
             .set_mem(cgroups_rs::memory::SetMemory {
                 min: None,
                 low: None,
@@ -395,14 +409,20 @@ impl Manager {
 
     /// Get memory.high threshold.
     pub fn get_high_bytes(&self) -> anyhow::Result<u64> {
-        let _ = self.memory_update_lock.lock();
-        info!("acquired lock on cgroup memory.* files");
-        let high = self
+        let memory = self
             .memory()
-            .tee("failed to get memory subsystem while getting memory statistics")?
-            .get_mem()
-            .map(|mem| mem.high)
-            .tee("failed to get memory statistics from subsystem")?;
+            .tee("failed to get memory subsystem while getting memory statistics")?;
+        let high = {
+            let _ = self.memory_update_lock.lock();
+            info!(
+                action = "getting memory.high",
+                "acquired lock on cgroup memory.* files"
+            );
+            memory
+                .get_mem()
+                .map(|mem| mem.high)
+                .tee("failed to get memory statistics from subsystem")?
+        };
         match high {
             Some(MaxValue::Max) => Ok(i64::MAX as u64),
             Some(MaxValue::Value(high)) => Ok(high as u64),
