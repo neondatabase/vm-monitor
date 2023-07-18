@@ -49,11 +49,14 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Handles incoming websocket connections. If we are already to connected to
+/// an informant, returns a 409 (conflict) response, as only one informant can
+/// be instructing is on what do at a time. Otherwise, starts the monitor.
 #[tracing::instrument(skip(ws))]
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AtomicBool>>) -> Response {
     if !state.fetch_or(true, Ordering::AcqRel) {
         info!("receiving websocket connection");
-        ws.on_upgrade(start_monitor)
+        ws.on_upgrade(|ws| start_monitor(ws, state))
     } else {
         warn!("already connected to an informant over websocket; sending 409");
         Response::builder()
@@ -61,17 +64,25 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AtomicBool>>) 
             .body(Full::from(
                 "monitor may only be connected to one informant at a time",
             ))
-            .unwrap()
+            .expect("making a body from a string literal should never fail")
             .into_response()
     }
 }
 
+// TODO: should these warns be hard errors? In theory they can happen in normal
+// operation if we're switching agents
+/// Starts the monitor. If startup fails or the monitor exits, and error will
+/// be logged and our internal state will be reset to allow for new connections.
 #[tracing::instrument(skip(ws))]
-async fn start_monitor(ws: WebSocket) {
+async fn start_monitor(ws: WebSocket, state: Arc<AtomicBool>) {
     let args = Args::parse();
     let mut monitor = match Monitor::new(Default::default(), args, ws).await {
         Ok(monitor) => monitor,
-        Err(e) => panic!("Failed to create monitor: {e}"),
+        Err(e) => {
+            warn!(error = ?e, "failed to create monitor");
+            state.fetch_and(false, Ordering::AcqRel);
+            return;
+        }
     };
     info!("connected to informant");
     match monitor.run().await {
@@ -79,7 +90,8 @@ async fn start_monitor(ws: WebSocket) {
             unreachable!("Monitor stopped running but returned Ok(())")
         }
         Err(e) => {
-            panic!("Monitor terminated on {e}");
+            warn!(error = ?e, "monitor terminated");
+            state.fetch_and(false, Ordering::AcqRel);
         }
     }
 }
