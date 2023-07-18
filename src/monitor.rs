@@ -6,9 +6,10 @@
 use std::sync::Arc;
 use std::{fmt::Debug, mem};
 
+use anyhow::anyhow;
 use async_std::channel;
 use axum::extract::ws::{Message, WebSocket};
-use futures_util::StreamExt;
+use futures_util::{StreamExt, TryFutureExt};
 use tracing::{debug, info, warn};
 
 use crate::transport::{
@@ -31,7 +32,6 @@ use crate::{
 pub struct Monitor {
     config: MonitorConfig,
     filecache: Option<FileCacheState>,
-    // TODO: flip it inside out to Arc<Option>?
     cgroup: Option<Arc<CgroupState>>,
     dispatcher: Dispatcher,
 
@@ -326,7 +326,7 @@ impl Monitor {
         Ok(())
     }
 
-    /// Take in a pack and perform some action, such as downscaling or upscaling,
+    /// Take in a packet and perform some action, such as downscaling or upscaling,
     /// and return a packet to be send back.
     #[tracing::instrument(skip(self))]
     pub async fn process_packet(
@@ -335,21 +335,28 @@ impl Monitor {
     ) -> anyhow::Result<Option<MonitorMessage>> {
         match inner {
             InformantMessageInner::UpscaleNotification { granted } => {
+                // This is a little funky to read but it allows us to chain a bunch
+                // of futures together without having to manually do an if let/match
+                // after every one of them. The and_then's allow us to sequence
+                // the futures, and the map_err's allow us to attach context.
+                // See the TryFutureExt
+                // trait wonderfully located
+                // in the futures crate
                 self.handle_upscale(granted)
+                    .map_err(|e| e.context("failed to handle upscale"))
+                    .and_then(|_| self.dispatcher.notify_upscale(granted))
+                    .map_err(|e| e.context("failed to notify cgroup of upscale event"))
+                    .and_then(|rx| rx.map_err(|e| anyhow!(e)))
+                    .map_err(|e| e.context("failed to get cgroup manager upscale acknowledgement"))
                     .await
-                    .tee("failed to handle upscale")?;
-                let rx = self
-                    .dispatcher
-                    .notify_upscale(granted)
-                    .await
-                    .tee("failed to notify cgroup of upscale event")?;
-                rx.await
-                    .tee("failed to confirm receipt of upscale by cgroup manager")?;
-                info!("confirmed receipt of upscale by cgroup manager");
-                Ok(Some(MonitorMessage::new(
-                    MonitorMessageInner::UpscaleConfirmation { error: None },
-                    id,
-                )))
+                    .map(|_| {
+                        // TODO: delete this log line when done testing
+                        info!("confirmed receipt of upscale by cgroup manager");
+                        Some(MonitorMessage::new(
+                            MonitorMessageInner::UpscaleConfirmation {},
+                            id,
+                        ))
+                    })
             }
             InformantMessageInner::DownscaleRequest { target } => {
                 let (ok, status) = self
@@ -366,6 +373,10 @@ impl Monitor {
                     error,
                     id, "received notification of an invalid message we sent"
                 );
+                Ok(None)
+            }
+            InformantMessageInner::InternalError { error } => {
+                warn!(error, id, "informant experienced an internal error");
                 Ok(None)
             }
         }
@@ -415,12 +426,20 @@ impl Monitor {
                                     _ => continue,
                                 };
 
-                                let Some(out) = self
-                                    .process_packet(packet)
-                                    .await
-                                    .tee("failed to process packet")?
-                                else {
-                                    continue
+                                let out = match self
+                                    .process_packet(packet.clone())
+                                    .await {
+                                    Ok(Some(out)) => out,
+                                    Ok(None) => continue,
+                                    Err(e) => {
+                                        warn!(error = &e.to_string(), "error handling packet");
+                                        MonitorMessage::new(
+                                            MonitorMessageInner::InternalError {
+                                                error: e.to_string()
+                                            },
+                                            packet.id
+                                        )
+                                    }
                                 };
 
                                 self.dispatcher

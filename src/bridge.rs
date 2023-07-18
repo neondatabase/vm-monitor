@@ -40,12 +40,15 @@ impl Dispatcher {
         request_upscale_events: Receiver<oneshot::Sender<()>>,
     ) -> anyhow::Result<Self> {
         let (mut sink, mut source) = stream.split();
+
+        // Figure out what protocol to use
         info!("waiting for informant to send protocol range");
         let proto_bounds = if let Some(bounds) = source.next().await {
             let bounds = bounds.tee("failed to read bounds off connection")?;
             if let Message::Text(bounds) = bounds {
                 info!(bounds, "received bounds message");
                 assert!(PROTOCOL_MIN_VERSION <= PROTOCOL_MAX_VERSION);
+                // Safe to unwrap because of the assert
                 let monitor_bounds: ProtocolBounds =
                     ProtocolBounds::new(PROTOCOL_MIN_VERSION, PROTOCOL_MAX_VERSION).unwrap();
                 let informant_bounds: ProtocolBounds =

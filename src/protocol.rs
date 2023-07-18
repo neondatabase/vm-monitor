@@ -11,6 +11,8 @@ pub const PROTOCOL_MAX_VERSION: ProtocolVersion = ProtocolVersion::V1_0;
 #[repr(u8)]
 pub enum ProtocolVersion {
     /// Represents v1.0 of the informant<-> monitor protocol - the initial version
+    ///
+    /// Currently the latest version.
     V1_0 = 1,
 }
 
@@ -23,7 +25,7 @@ impl fmt::Display for ProtocolVersion {
 }
 
 /// A set of protocol bounds that determines what we are speaking. An invariant
-/// that must be maintained is that min <= max
+/// that must be maintained is that min <= max. These bounds are inclusive.
 #[derive(Deserialize, Debug)]
 pub struct ProtocolBounds {
     min: ProtocolVersion,
@@ -41,7 +43,7 @@ impl fmt::Display for ProtocolBounds {
 }
 
 impl ProtocolBounds {
-    /// Create a new `ProtoBounds`. Returns None if min > max
+    /// Create a new `ProtocolBounds`. Returns None if min > max
     pub fn new(min: ProtocolVersion, max: ProtocolVersion) -> Option<Self> {
         if min > max {
             None
@@ -50,7 +52,7 @@ impl ProtocolBounds {
         }
     }
 
-    /// Merge to `ProtoBounds` to create a range that suitable for both of them.
+    /// Merge to `ProtocolBounds` to create a range that suitable for both of them.
     pub fn highest_shared_version(&self, other: &Self) -> anyhow::Result<ProtocolVersion> {
         // We first have to make sure the ranges are overlapping. Once we know
         // this, we can merge the ranges by taking the max of the mins and the

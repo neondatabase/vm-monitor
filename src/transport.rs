@@ -28,7 +28,7 @@
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct MonitorMessage {
     #[serde(flatten)]
     pub(crate) inner: MonitorMessageInner,
@@ -41,28 +41,30 @@ impl MonitorMessage {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum MonitorMessageInner {
     InvalidMessage { error: String },
-    // TODO: make sending erors more general so that this is just empty
-    UpscaleConfirmation { error: Option<String> },
+    InternalError { error: String },
+    // This is a struct variant because of the way go serializes struct{}
+    UpscaleConfirmation {},
     // This is a struct variant because of the way go serializes struct{}
     UpscaleRequest {},
     DownscaleResult { ok: bool, status: String },
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct InformantMessage {
     #[serde(flatten)]
     pub(crate) inner: InformantMessageInner,
     pub(crate) id: usize,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type", content = "content")]
 pub enum InformantMessageInner {
     InvalidMessage { error: String },
+    InternalError { error: String },
     UpscaleNotification { granted: Allocation },
     DownscaleRequest { target: Allocation },
 }
