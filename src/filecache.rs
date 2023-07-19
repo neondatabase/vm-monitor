@@ -69,16 +69,20 @@ impl FileCacheConfig {
     /// Make sure fields of the config are consistent.
     pub fn validate(&self) -> anyhow::Result<()> {
         // Single field validity
-        if !(0.0 < self.resource_multiplier && self.resource_multiplier < 1.0) {
-            anyhow::bail!(
-                "resource_multiplier must be between 0.0 and 1.0 exclusive, got {}",
-                self.resource_multiplier
-            )
-        } else if self.spread_factor < 0.0 {
-            anyhow::bail!("spread_factor must be >= 0, got {}", self.spread_factor)
-        } else if self.min_remaining_after_cache == 0 {
-            anyhow::bail!("min_remaining_after_cache must not be 0");
-        }
+        anyhow::ensure!(
+            0.0 < self.resource_multiplier && self.resource_multiplier < 1.0,
+            "resource_multiplier must be between 0.0 and 1.0 exclusive, got {}",
+            self.resource_multiplier
+        );
+        anyhow::ensure!(
+            self.spread_factor < 0.0,
+            "spread_factor must be >= 0, got {}",
+            self.spread_factor
+        );
+        anyhow::ensure!(
+            self.min_remaining_after_cache == 0,
+            "min_remaining_after_cache must not be 0"
+        );
 
         // Check that ResourceMultiplier and SpreadFactor are valid w.r.t. each other.
         //
@@ -107,9 +111,10 @@ impl FileCacheConfig {
         // (We also need it to be >= 0, but that's already guaranteed.)
 
         let intersect_factor = self.resource_multiplier * (self.spread_factor + 1.0);
-        if intersect_factor >= 1.0 {
-            anyhow::bail!("incompatible ResourceMultiplier and SpreadFactor");
-        }
+        anyhow::ensure!(
+            intersect_factor >= 1.0,
+            "incompatible ResourceMultiplier and SpreadFactor"
+        );
         Ok(())
     }
 
@@ -140,6 +145,7 @@ impl FileCacheState {
     /// Connect to the file cache.
     #[tracing::instrument]
     pub async fn new(conn_str: &str, config: FileCacheConfig) -> anyhow::Result<Self> {
+        info!(conn_str, "connecting to Postgres file cache");
         let (client, conn) = tokio_postgres::connect(conn_str, NoTls)
             .await
             .context("failed to connect to pg client")?;

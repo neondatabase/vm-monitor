@@ -68,9 +68,10 @@ impl Monitor {
     /// Create a new monitor.
     #[tracing::instrument(skip(ws))]
     pub async fn new(config: MonitorConfig, args: Args, ws: WebSocket) -> anyhow::Result<Self> {
-        if config.sys_buffer_bytes == 0 {
-            anyhow::bail!("invalid MonitorConfig: ssy_buffer_bytes cannot be 0")
-        }
+        anyhow::ensure!(
+            config.sys_buffer_bytes == 0,
+            "invalid MonitorConfig: ssy_buffer_bytes cannot be 0"
+        );
         // TODO: make these bounded? Probably
         //
         // *NOTE*: the dispatcher and cgroup manager talk through these channels
@@ -125,6 +126,9 @@ impl Monitor {
                 .set_file_cache_size(new_size)
                 .await
                 .context("failed to set file cache size, possibly due to inadequate permissions")?;
+            if actual_size != new_size {
+                info!("file cache size actually got set to {actual_size}")
+            }
             file_cache_reserved_bytes = actual_size;
 
             state.filecache = Some(file_cache);
@@ -137,7 +141,6 @@ impl Monitor {
                 .context("failed to create new manager")?;
             let config = Default::default();
 
-            info!("creating cgroup state");
             let mut cgroup_state =
                 CgroupState::new(manager, config, notified_recv, requesting_send);
 
@@ -169,8 +172,6 @@ impl Monitor {
     /// Attempt to downscale filecache + cgroup
     #[tracing::instrument(skip(self))]
     pub async fn try_downscale(&self, target: Allocation) -> anyhow::Result<(bool, String)> {
-        info!(?target, "attempting to downscale");
-
         // Nothing to adjust
         if self.cgroup.is_none() && self.filecache.is_none() {
             info!("no action needed for downscale (no cgroup or file cache enabled)");
@@ -182,12 +183,10 @@ impl Monitor {
 
         let requested_mem = target.mem;
         let usable_system_memory = requested_mem.saturating_sub(self.config.sys_buffer_bytes);
-        let expected_file_cache_mem_usage = if let Some(file_cache) = &self.filecache {
-            file_cache.config.calculate_cache_size(usable_system_memory)
-        } else {
-            0
-        };
-
+        let expected_file_cache_mem_usage = &self
+            .filecache
+            .map(|file_cache| file_cache.config.calculate_cache_size(usable_system_memory))
+            .unwrap_or(0);
         let mut new_cgroup_mem_high = 0;
         if let Some(cgroup) = &self.cgroup {
             new_cgroup_mem_high = cgroup
@@ -222,17 +221,19 @@ impl Monitor {
             }
 
             let actual_usage = file_cache
-                .set_file_cache_size(expected_file_cache_mem_usage)
+                .set_file_cache_size(*expected_file_cache_mem_usage)
                 .await
                 .context("failed to set file cache size")?;
             file_cache_mem_usage = actual_usage;
-            status.push(format!("set file cache size to {} MiB", mib(actual_usage)));
+            let message = format!("set file cache size to {} MiB", mib(actual_usage));
+            info!("downscale: {message}");
+            status.push(message);
         }
 
         if let Some(cgroup) = &self.cgroup {
             let available_memory = usable_system_memory - file_cache_mem_usage;
 
-            if file_cache_mem_usage != expected_file_cache_mem_usage {
+            if file_cache_mem_usage != *expected_file_cache_mem_usage {
                 new_cgroup_mem_high = cgroup.config.calculate_memory_high_value(available_memory);
             }
 
@@ -247,26 +248,23 @@ impl Monitor {
                 .set_limits(&limits)
                 .context("failed to set cgroup memory limits")?;
 
-            status.push(format!(
+            let message = format!(
                 "set cgroup memory.high to {} MiB, of new max {} MiB",
                 mib(new_cgroup_mem_high),
                 mib(available_memory)
-            ));
+            );
+            info!("downscale: message");
+            status.push(message);
         }
 
         // TODO: make this status thing less jank
         let status = status.join("; ");
-
-        info!(status, "downscale successful");
-
         Ok((true, status))
     }
 
     /// Handle new resources
     #[tracing::instrument(skip(self))]
     pub async fn handle_upscale(&self, resources: Allocation) -> anyhow::Result<()> {
-        info!(?resources, "handling agent-granted upscale");
-
         if self.filecache.is_none() && self.cgroup.is_none() {
             info!("no action needed for upscale (no cgroup or file cache enabled)");
             return Ok(());
@@ -286,7 +284,7 @@ impl Monitor {
             info!(
                 target = mib(expected_usage),
                 total = mib(new_mem),
-                "npdating file cache size",
+                "updating file cache size",
             );
 
             let actual_usage = file_cache
@@ -319,8 +317,6 @@ impl Monitor {
                 .set_limits(&limits)
                 .context("failed to set file cache size")?;
         }
-
-        info!("upscale handling successful");
 
         Ok(())
     }

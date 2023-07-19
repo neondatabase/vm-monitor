@@ -115,23 +115,17 @@ impl CgroupState {
 
     #[tracing::instrument(skip(self))]
     pub async fn set_memory_limits(&mut self, available_memory: u64) -> anyhow::Result<()> {
-        info!(name = self.manager.name, "setting memory limits for cgroup");
         let new_high = self.config.calculate_memory_high_value(available_memory);
+        self.manager.flush_high_event()?;
+        let limits = MemoryLimits::new(new_high, available_memory);
         info!(
-            self.manager.name,
-            memory = mib(new_high),
+            name = self.manager.name,
+            memory = ?limits,
             "setting cgroup memory",
         );
-
-        self.manager.flush_high_event()?;
-
-        let limits = MemoryLimits::new(new_high, available_memory);
-
         self.manager
             .set_limits(&limits)
             .context("failed to set cgroup memory limits")?;
-
-        info!(self.manager.name, "successfully set cgroup memory limits");
         Ok(())
     }
 
@@ -140,7 +134,7 @@ impl CgroupState {
         // FIXME: we should have "proper" error handling instead of just panicking. It's hard to
         // determine what the correct behavior should be if a cgroup operation fails, though.
         let state = Arc::clone(self);
-        info!(state.manager.name, "starting main signals loop");
+        info!(name = state.manager.name, "starting main signals loop");
         tokio::spawn(async move {
             let mut waiting_on_upscale = false;
             let wait_to_increase_memory_high = tokio::time::sleep(Duration::ZERO);
@@ -178,6 +172,7 @@ impl CgroupState {
                     _ = state.manager.highs.recv() => {
                         tokio::select! {
                             biased;
+                            // Is this is suitable use case for now_or_never?
                             _ = &mut wait_to_freeze => {
                                 match state.handle_memory_high_event().await {
                                      Ok(b) => {
@@ -290,7 +285,6 @@ impl CgroupState {
     pub async fn handle_memory_high_event(&self) -> anyhow::Result<bool> {
         tokio::select! {
             biased;
-
             bundle = self.notify_upscale_events.recv() => {
                 info!("skipping memory.high event because there was an upscale event");
                 match bundle {
@@ -305,32 +299,27 @@ impl CgroupState {
                 }
                 return Ok(false);
             },
-
             _ = future::ready(()) => {}
         };
 
         info!("received memory.high event; freezing cgroup");
-
         self.manager
             .freeze()
             .with_context(|| format!("failed to freeze cgroup {}", self.manager.name))?;
 
         let start = Instant::now();
-
         let must_thaw = tokio::time::sleep(self.config.max_upscale_wait);
 
         info!(
             wait = ?self.config.max_upscale_wait,
             "sending request for immediate upscaling; waiting",
         );
-
         self.request_upscale()
             .await
             .context("failed to request upscale")?;
 
         let mut upscaled = false;
         let total_wait;
-
         tokio::select! {
             bundle = self.notify_upscale_events.recv() => {
                 total_wait = start.elapsed();
@@ -358,18 +347,16 @@ impl CgroupState {
                 )
             }
         };
-
         self.manager
             .thaw()
             .with_context(|| format!("failed to thaw cgroup {}", self.manager.name))?;
-
         self.manager.flush_high_event()?;
-
         Ok(!upscaled)
     }
 
     #[tracing::instrument(skip(self))]
     pub async fn request_upscale(&self) -> anyhow::Result<()> {
+        info!("requesting upscale");
         let (tx, rx) = oneshot::channel();
         self.request_upscale_events
             .send(tx)

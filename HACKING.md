@@ -1,20 +1,6 @@
 # Logging
-This crate makes use of [`tracing-subscriber`] to perform structured logging.
 All log messages should be lowercase to make grepping easier - I've determined
-scientifically that this is less work than always adding `-i`. Many log messages
-also have an action field. For messages that inform the reader of something being
-done use this field. For example, prefer:
-```
-info!(action = "shaving the yaks")
-```
-to
-```
-info!("shaving the yaks")
-```
-Whereas informing the reader of something happening has no frills:
-```
-warn!("one yak was too hairy")
-```
+scientifically that this is less work than always adding `-i`.
 
 # Channels
 The channel used in this crate is [`async_std::channel`], an `mpmc` bounded

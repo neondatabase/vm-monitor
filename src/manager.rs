@@ -120,9 +120,8 @@ impl Manager {
 
         let cgroup = Cgroup::load(hierarchies::auto(), &name);
 
-        info!("creating file watcher for memory.high events");
-
         // Set up a watcher that notifies on changes to memory.events
+        info!("creating file watcher for memory.high events");
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
         let inotify = Inotify::init().context("failed to initialize file watcher")?;
         inotify
@@ -134,8 +133,7 @@ impl Manager {
         let (event_tx, event_rx) = channel::bounded(1);
         let (error_tx, error_rx) = channel::bounded(1);
 
-        // The duration to separate restarts of the listener by.
-        // 1000ms = 1s
+        // The duration to separate restarts of the listener by: 1000ms = 1s
         let min_wait = Duration::from_millis(1000);
 
         let timer = tokio::time::sleep(min_wait);
@@ -281,8 +279,8 @@ impl Manager {
             .filter_map(|s| s.split_once(' '))
             .find(|(e, _)| *e == event.to_string())
             .map(|(_, count)| count.parse::<u64>())
-            .ok_or(anyhow!("error getting memory.high event count"))
-            .with_context(|| format!("failed to find entry for memory.high events in {path}"))?
+            .ok_or(anyhow!("error getting memory.{event} event count"))
+            .with_context(|| format!("failed to find entry for memory.{event} events in {path}"))?
             .context("failed to parse memory.high as u64")
     }
 
