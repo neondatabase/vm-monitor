@@ -44,13 +44,29 @@ impl MonitorMessage {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
 pub enum MonitorMessageInner {
-    InvalidMessage { error: String },
-    InternalError { error: String },
+    InvalidMessage {
+        error: String,
+    },
+    InternalError {
+        error: String,
+    },
     // This is a struct variant because of the way go serializes struct{}
     UpscaleConfirmation {},
     // This is a struct variant because of the way go serializes struct{}
     UpscaleRequest {},
-    DownscaleResult { ok: bool, status: String },
+
+    // FIXME for the future (once the informant is deprecated)
+    // As of the time of writing, the informant also uses a struct on the go
+    // side called DownscaleResult. This struct has uppercase fields which are
+    // serialized as such. Thus, we serialize using uppercase names so we don't
+    // have to make a breaking change to the agent<->informant protocol. Once
+    // the informant has been superseded by the monitor, this can be changed back.
+    DownscaleResult {
+        #[serde(rename = "Ok")]
+        ok: bool,
+        #[serde(rename = "Status")]
+        status: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
