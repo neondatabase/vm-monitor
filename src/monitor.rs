@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::{fmt::Debug, mem};
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_std::channel;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{StreamExt, TryFutureExt};
@@ -22,7 +22,7 @@ use crate::{
     protocol::{
         Allocation, InformantMessage, InformantMessageInner, MonitorMessage, MonitorMessageInner,
     },
-    Args, LogContext, MiB,
+    Args, MiB,
 };
 
 /// Central struct that interacts with informant, dispatcher, and cgroup to handle
@@ -80,7 +80,7 @@ impl Monitor {
 
         let dispatcher = Dispatcher::new(ws, notified_send, requesting_recv)
             .await
-            .tee("error creating new dispatcher")?;
+            .context("error creating new dispatcher")?;
 
         let mut state = Monitor {
             config,
@@ -105,12 +105,12 @@ impl Monitor {
 
             let file_cache = FileCacheState::new(&connstr, config)
                 .await
-                .tee("failed to create file cache")?;
+                .context("failed to create file cache")?;
 
             let size = file_cache
                 .get_file_cache_size()
                 .await
-                .tee("error getting file cache size")?;
+                .context("error getting file cache size")?;
 
             let new_size = file_cache.config.calculate_cache_size(mem);
             info!(
@@ -124,7 +124,7 @@ impl Monitor {
             let actual_size = file_cache
                 .set_file_cache_size(new_size)
                 .await
-                .tee("failed to set file cache size, possibly due to inadequate permissions")?;
+                .context("failed to set file cache size, possibly due to inadequate permissions")?;
             file_cache_reserved_bytes = actual_size;
 
             state.filecache = Some(file_cache);
@@ -134,7 +134,7 @@ impl Monitor {
             info!(action = "creating manager");
             let manager = Manager::new(name)
                 .await
-                .tee("failed to create new manager")?;
+                .context("failed to create new manager")?;
             let config = Default::default();
 
             info!(action = "creating cgroup state");
@@ -146,7 +146,7 @@ impl Monitor {
             cgroup_state
                 .set_memory_limits(available)
                 .await
-                .tee("failed to set cgroup memory limits")?;
+                .context("failed to set cgroup memory limits")?;
 
             let cgroup_state = Arc::new(cgroup_state);
             let clone = Arc::clone(&cgroup_state);
@@ -196,7 +196,7 @@ impl Monitor {
 
             let current = cgroup
                 .get_current_memory()
-                .tee("failed to fetch cgroup memory")?;
+                .context("failed to fetch cgroup memory")?;
 
             if new_cgroup_mem_high < current + cgroup.config.memory_high_buffer_bytes {
                 let status = format!(
@@ -224,7 +224,7 @@ impl Monitor {
             let actual_usage = file_cache
                 .set_file_cache_size(expected_file_cache_mem_usage)
                 .await
-                .tee("failed to set file cache size")?;
+                .context("failed to set file cache size")?;
             file_cache_mem_usage = actual_usage;
             status.push(format!("set file cache size to {} MiB", mib(actual_usage)));
         }
@@ -237,7 +237,7 @@ impl Monitor {
             }
 
             let limits = MemoryLimits::new(
-                // new_cgroup_mem_high is initialized to 0 but it is guaranteed to not be here
+                // new_cgroup_mem_high is initialized to 0 but it is guarancontextd to not be here
                 // since it is properly initialized in the previous cgroup if let block
                 new_cgroup_mem_high,
                 available_memory,
@@ -245,7 +245,7 @@ impl Monitor {
             cgroup
                 .manager
                 .set_limits(&limits)
-                .tee("failed to set cgroup memory limits")?;
+                .context("failed to set cgroup memory limits")?;
 
             status.push(format!(
                 "set cgroup memory.high to {} MiB, of new max {} MiB",
@@ -292,7 +292,7 @@ impl Monitor {
             let actual_usage = file_cache
                 .set_file_cache_size(expected_usage)
                 .await
-                .tee("failed to set file cache size")?;
+                .context("failed to set file cache size")?;
 
             if actual_usage != expected_usage {
                 warn!(
@@ -317,7 +317,7 @@ impl Monitor {
             cgroup
                 .manager
                 .set_limits(&limits)
-                .tee("failed to set file cache size")?;
+                .context("failed to set file cache size")?;
         }
 
         info!("upscale handling successful");
@@ -361,7 +361,7 @@ impl Monitor {
                 let (ok, status) = self
                     .try_downscale(target)
                     .await
-                    .tee("failed to downscale")?;
+                    .context("failed to downscale")?;
                 Ok(Some(MonitorMessage::new(
                     MonitorMessageInner::DownscaleResult { ok, status },
                     id,
@@ -396,7 +396,7 @@ impl Monitor {
                             self.dispatcher
                                 .send(MonitorMessage::new(MonitorMessageInner::UpscaleRequest {}, self.counter))
                                 .await
-                                .tee("failed to send packet")?;
+                                .context("failed to send packet")?;
                             if sender.send(()).is_err() {
                                 warn!("error sending confirmation of upscale request to cgroup");
                             };
@@ -417,10 +417,10 @@ impl Monitor {
                                 // is too long and prevents reading/writing the stream.
                                 let packet: InformantMessage = match msg {
                                     Message::Text(text) => {
-                                        serde_json::from_str(&text).tee("failed to deserialize text message")?
+                                        serde_json::from_str(&text).context("failed to deserialize text message")?
                                     }
                                     Message::Binary(bin) => {
-                                        serde_json::from_slice(&bin).tee("failed to deserialize binary message")?
+                                        serde_json::from_slice(&bin).context("failed to deserialize binary message")?
                                     }
                                     _ => continue,
                                 };
@@ -444,7 +444,7 @@ impl Monitor {
                                 self.dispatcher
                                     .send(out)
                                     .await
-                                    .tee("failed to send packet")?;
+                                    .context("failed to send packet")?;
                             }
                             Err(e) => warn!("{e}"),
                         }

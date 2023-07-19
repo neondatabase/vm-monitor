@@ -1,7 +1,7 @@
 // TODO: should all fields be pub(crate)?
 
-use crate::LogContext;
 use crate::MiB;
+use anyhow::Context;
 use tokio_postgres::Client;
 use tokio_postgres::NoTls;
 use tracing::{error, info};
@@ -141,7 +141,7 @@ impl FileCacheState {
     pub async fn new(conn_str: &str, config: FileCacheConfig) -> anyhow::Result<Self> {
         let (client, conn) = tokio_postgres::connect(conn_str, NoTls)
             .await
-            .tee("failed to connect to pg client")?;
+            .context("failed to connect to pg client")?;
 
         // The connection object performs the actual communication with the database,
         // so spawn it off to run on its own. See tokio-postgres docs.
@@ -151,7 +151,7 @@ impl FileCacheState {
             }
         });
 
-        config.validate().tee("file cache config is invalid")?;
+        config.validate().context("file cache config is invalid")?;
         Ok(Self { client, config })
     }
 
@@ -164,12 +164,12 @@ impl FileCacheState {
                 &[],
             )
             .await
-            .tee("failed to query pg for file cache size")?
+            .context("failed to query pg for file cache size")?
             // pg_size_bytes returns a bigint which is the same as an i64.
             .try_get::<_, i64>(0)
             // Since the size of the table is not negative, the cast is sound.
             .map(|bytes| bytes as u64)
-            .tee("failed to extract file cache size from query result")
+            .context("failed to extract file cache size from query result")
     }
 
     /// Attempt to set the file cache size, returning the size it was actually
@@ -183,10 +183,10 @@ impl FileCacheState {
                 &[],
             )
             .await
-            .tee("failed to query pg for max file cache size")?
+            .context("failed to query pg for max file cache size")?
             .try_get::<_, i64>(0)
             .map(|bytes| bytes as u64)
-            .tee("failed to extract amx file cache size form query result")?;
+            .context("failed to extract amx file cache size form query result")?;
 
         let mut num_mb = num_bytes / MiB;
         let max_mb = max_bytes / MiB;
@@ -214,12 +214,12 @@ impl FileCacheState {
                 &[],
             )
             .await
-            .tee("failed to change file cache size limit")?;
+            .context("failed to change file cache size limit")?;
 
         self.client
             .execute("SELECT pg_reload_conf();", &[])
             .await
-            .tee("failed to reload config")?;
+            .context("failed to reload config")?;
 
         Ok(num_mb * MiB)
     }

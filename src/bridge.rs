@@ -4,6 +4,7 @@
 //! `transport`) between informant and monitor. The `Dispatcher` is a handy
 //! way to process and send packets in a straightforward way.
 
+use anyhow::Context;
 use async_std::channel::{Receiver, Sender};
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{
@@ -20,7 +21,6 @@ use crate::{
         ProtocolBounds, ProtocolResponse, ProtocolVersion, PROTOCOL_MAX_VERSION,
         PROTOCOL_MIN_VERSION,
     },
-    LogContext,
 };
 
 #[derive(Debug)]
@@ -44,7 +44,7 @@ impl Dispatcher {
         // Figure out what protocol to use
         info!("waiting for informant to send protocol range");
         let proto_bounds = if let Some(bounds) = source.next().await {
-            let bounds = bounds.tee("failed to read bounds off connection")?;
+            let bounds = bounds.context("failed to read bounds off connection")?;
             if let Message::Text(bounds) = bounds {
                 info!(bounds, "received bounds message");
                 assert!(PROTOCOL_MIN_VERSION <= PROTOCOL_MAX_VERSION);
@@ -52,14 +52,14 @@ impl Dispatcher {
                 let monitor_bounds: ProtocolBounds =
                     ProtocolBounds::new(PROTOCOL_MIN_VERSION, PROTOCOL_MAX_VERSION).unwrap();
                 let informant_bounds: ProtocolBounds =
-                    serde_json::from_str(&bounds).tee("failed to deserialize bounds")?;
+                    serde_json::from_str(&bounds).context("failed to deserialize bounds")?;
                 match monitor_bounds.highest_shared_version(&informant_bounds) {
                     Ok(version) => {
                         sink.send(Message::Text(
                             serde_json::to_string(&ProtocolResponse::version(version)).unwrap(),
                         ))
                         .await
-                        .tee("failed to notify informant of negotiated protocol version")?;
+                        .context("failed to notify informant of negotiated protocol version")?;
                         version
                     }
                     Err(e) => {
@@ -71,8 +71,10 @@ impl Dispatcher {
                             .unwrap(),
                         ))
                         .await
-                        .tee("failed to notify informant of no overlap between protocol ranges")?;
-                        Err(e).tee("error determining suitable protocol bounds")?
+                        .context(
+                            "failed to notify informant of no overlap between protocol ranges",
+                        )?;
+                        Err(e).context("error determining suitable protocol bounds")?
                     }
                 }
             } else {
@@ -102,7 +104,7 @@ impl Dispatcher {
         self.notify_upscale_events
             .send((resources, tx))
             .await
-            .tee("failed to send resources and oneshot sender across channel")?;
+            .context("failed to send resources and oneshot sender across channel")?;
         Ok(rx)
     }
 
@@ -111,10 +113,10 @@ impl Dispatcher {
     #[tracing::instrument(skip(self))]
     pub async fn send(&mut self, message: MonitorMessage) -> anyhow::Result<()> {
         debug!(?message, action = "sending packet");
-        let json = serde_json::to_string(&message).tee("failed to serialize packet")?;
+        let json = serde_json::to_string(&message).context("failed to serialize packet")?;
         self.sink
             .send(Message::Text(json))
             .await
-            .tee("stream error sending message")
+            .context("stream error sending message")
     }
 }

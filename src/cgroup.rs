@@ -1,5 +1,6 @@
 use std::{future, sync::Arc, time::Duration};
 
+use anyhow::Context;
 use async_std::channel::{Receiver, Sender};
 use tokio::{sync::oneshot, time::Instant};
 use tracing::info;
@@ -8,7 +9,7 @@ use crate::{
     manager::{Manager, MemoryLimits},
     mib,
     protocol::Allocation,
-    LogContext, MiB,
+    MiB,
 };
 
 #[derive(Debug)]
@@ -127,7 +128,7 @@ impl CgroupState {
 
         self.manager
             .set_limits(&limits)
-            .tee("failed to set cgroup memory limits")?;
+            .context("failed to set cgroup memory limits")?;
 
         info!(self.manager.name, "successfully set cgroup memory limits");
         Ok(())
@@ -316,7 +317,7 @@ impl CgroupState {
 
         self.manager
             .freeze()
-            .with_tee(|| format!("failed to freeze cgroup {}", self.manager.name))?;
+            .with_context(|| format!("failed to freeze cgroup {}", self.manager.name))?;
 
         let start = Instant::now();
 
@@ -330,7 +331,7 @@ impl CgroupState {
 
         self.request_upscale()
             .await
-            .tee("failed to request upscale")?;
+            .context("failed to request upscale")?;
 
         let mut upscaled = false;
         let total_wait;
@@ -367,7 +368,7 @@ impl CgroupState {
 
         self.manager
             .thaw()
-            .with_tee(|| format!("failed to thaw cgroup {}", self.manager.name))?;
+            .with_context(|| format!("failed to thaw cgroup {}", self.manager.name))?;
 
         self.manager.flush_high_event()?;
 
@@ -380,9 +381,9 @@ impl CgroupState {
         self.request_upscale_events
             .send(tx)
             .await
-            .tee("failed to send upscale request across channel")?;
+            .context("failed to send upscale request across channel")?;
         rx.await
-            .tee("failed to read confirmation of receipt of upscale request")?;
+            .context("failed to read confirmation of receipt of upscale request")?;
         Ok(())
     }
 }

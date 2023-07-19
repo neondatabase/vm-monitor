@@ -17,7 +17,7 @@ use std::{
     time::Duration,
 };
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use async_std::channel::{self, Receiver, TryRecvError};
 use cgroups_rs::{
     cgroup::{Cgroup, UNIFIED_MOUNTPOINT},
@@ -32,8 +32,6 @@ use inotify::{Inotify, WatchMask};
 use notify::Event;
 use tokio::time::Instant;
 use tracing::{info, trace, warn};
-
-use crate::LogContext;
 
 /// `Manager` basically represents a cgroup. Its methods cover the behaviour we
 /// want from said cgroup, such as increasing and decreasing memory.{max,high},
@@ -127,11 +125,11 @@ impl Manager {
 
         // Set up a watcher that notifies on changes to memory.events
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
-        let inotify = Inotify::init().tee("failed to initialize file watcher")?;
+        let inotify = Inotify::init().context("failed to initialize file watcher")?;
         inotify
             .watches()
             .add(&path, WatchMask::MODIFY)
-            .with_tee(|| format!("failed to start watching {path}"))?;
+            .with_context(|| format!("failed to start watching {path}"))?;
 
         // These are effectively just signals
         let (event_tx, event_rx) = channel::bounded(1);
@@ -211,7 +209,7 @@ impl Manager {
         // and the only other thing that could access the file is the the thread
         // we just spawned. Therefore, the likelihood of a race is very small.
         let high = Self::get_event_count(&name, MemoryEvent::High)
-            .tee("failed to extract number of memory.high events from memory.events")?;
+            .context("failed to extract number of memory.high events from memory.events")?;
         info!(
             events = high,
             "the current number of memory.high events: {high}"
@@ -285,16 +283,16 @@ impl Manager {
             .find(|(e, _)| *e == event.to_string())
             .map(|(_, count)| count.parse::<u64>())
             .ok_or(anyhow!("error getting memory.high event count"))
-            .with_tee(|| format!("failed to find entry for memory.high events in {path}"))?
-            .tee("failed to parse memory.high as u64")
+            .with_context(|| format!("failed to find entry for memory.high events in {path}"))?
+            .context("failed to parse memory.high as u64")
     }
 
     /// Retrieve whether cgroup is frozen or thawed.
     pub fn state(&self) -> anyhow::Result<FreezerState> {
         self.freezer()
-            .tee("failed to get freezer subsystem while attempting to get freezer state")?
+            .context("failed to get freezer subsystem while attempting to get freezer state")?
             .state()
-            .tee("failed to get freezer state")
+            .context("failed to get freezer state")
     }
 
     /// Get a handle on the freezer subsystem.
@@ -314,17 +312,17 @@ impl Manager {
     /// Attempt to freeze the cgroup.
     pub fn freeze(&self) -> anyhow::Result<()> {
         self.freezer()
-            .tee("failed to get freezer subsystem")?
+            .context("failed to get freezer subsystem")?
             .freeze()
-            .tee("failed to freeze")
+            .context("failed to freeze")
     }
 
     /// Attempt to thaw the cgroup.
     pub fn thaw(&self) -> anyhow::Result<()> {
         self.freezer()
-            .tee("failed to get freezer subsystem")?
+            .context("failed to get freezer subsystem")?
             .thaw()
-            .tee("failed to thaw")
+            .context("failed to thaw")
     }
 
     /// Get a handle on the memory subsystem.
@@ -348,7 +346,7 @@ impl Manager {
     /// Get cgroup current memory usage.
     pub fn current_memory_usage(&self) -> anyhow::Result<u64> {
         // Get the subsystem first to avoid hold the lock for longer than necessary
-        let memory = self.memory().tee("failed to get memory subsystem")?;
+        let memory = self.memory().context("failed to get memory subsystem")?;
 
         let _lock = self.memory_update_lock.lock().unwrap();
         info!(
@@ -361,7 +359,7 @@ impl Manager {
     /// Set cgroup memory.high threshold.
     pub fn set_high_bytes(&self, bytes: u64) -> anyhow::Result<()> {
         // Get the subsystem first to avoid hold the lock for longer than necessary
-        let memory = self.memory().tee("failed to get memory subsystem")?;
+        let memory = self.memory().context("failed to get memory subsystem")?;
 
         let _lock = self.memory_update_lock.lock().unwrap();
         info!(
@@ -375,7 +373,7 @@ impl Manager {
                 min: None,
                 max: None,
             })
-            .tee("failed to set memory.high")
+            .context("failed to set memory.high")
     }
 
     /// Set cgroup memory.high and memory.max.
@@ -383,7 +381,7 @@ impl Manager {
         // Get the subsystem first to avoid hold the lock for longer than necessary
         let memory = self
             .memory()
-            .tee("failed to get memory subsystem while setting memory limits")?;
+            .context("failed to get memory subsystem while setting memory limits")?;
 
         let _lock = self.memory_update_lock.lock().unwrap();
         info!(
@@ -404,14 +402,14 @@ impl Manager {
                 )),
                 max: Some(MaxValue::Value(u64::min(limits.max, i64::MAX as u64) as i64)),
             })
-            .tee("failed to set memory limits")
+            .context("failed to set memory limits")
     }
 
     /// Get memory.high threshold.
     pub fn get_high_bytes(&self) -> anyhow::Result<u64> {
         let memory = self
             .memory()
-            .tee("failed to get memory subsystem while getting memory statistics")?;
+            .context("failed to get memory subsystem while getting memory statistics")?;
         let high = {
             let _ = self.memory_update_lock.lock();
             info!(
@@ -421,7 +419,7 @@ impl Manager {
             memory
                 .get_mem()
                 .map(|mem| mem.high)
-                .tee("failed to get memory statistics from subsystem")?
+                .context("failed to get memory statistics from subsystem")?
         };
         match high {
             Some(MaxValue::Max) => Ok(i64::MAX as u64),
