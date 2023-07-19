@@ -1,3 +1,7 @@
+//! This module manages the actual cgroup operations we need to perform to
+//! upscale and downscale. It also handles sending upscale requests to the
+//! dispatcher.
+
 use std::{future, sync::Arc, time::Duration};
 
 use anyhow::Context;

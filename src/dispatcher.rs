@@ -1,8 +1,11 @@
 //! # bridge
 //!
-//! Contains types that manage the interaction (not data intercahnge, see
-//! `transport`) between informant and monitor. The `Dispatcher` is a handy
-//! way to process and send packets in a straightforward way.
+//! The dispatcher manages many of the signals in the monitor. It types that
+//! manage the interaction (not data intercahnge, see `protocol`) between
+//! informant and monitor, allow us to to process and send packets in a
+//! straightforward way. The dispatcher also manages that signals that come from
+//! the cgroup (requesting upscale), and the signals that go to the cgroup (
+//! notifying it of upscale).
 
 use anyhow::Context;
 use async_std::channel::{Receiver, Sender};
@@ -12,7 +15,7 @@ use futures_util::{
     SinkExt, StreamExt,
 };
 use tokio::sync::oneshot;
-use tracing::{debug, info};
+use tracing::info;
 
 use crate::{
     protocol::{Allocation, MonitorMessage},
@@ -44,41 +47,39 @@ impl Dispatcher {
         info!("waiting for informant to send protocol range");
         let proto_bounds = if let Some(bounds) = source.next().await {
             let bounds = bounds.context("failed to read bounds off connection")?;
-            if let Message::Text(bounds) = bounds {
-                info!(bounds, "received bounds message");
-                assert!(PROTOCOL_MIN_VERSION <= PROTOCOL_MAX_VERSION);
-                // Safe to unwrap because of the assert
-                let monitor_bounds: ProtocolBounds =
-                    ProtocolBounds::new(PROTOCOL_MIN_VERSION, PROTOCOL_MAX_VERSION).unwrap();
-                let informant_bounds: ProtocolBounds =
-                    serde_json::from_str(&bounds).context("failed to deserialize bounds")?;
-                match monitor_bounds.highest_shared_version(&informant_bounds) {
-                    Ok(version) => {
-                        sink.send(Message::Text(
-                            serde_json::to_string(&ProtocolResponse::version(version)).unwrap(),
-                        ))
-                        .await
-                        .context("failed to notify informant of negotiated protocol version")?;
-                        version
-                    }
-                    Err(e) => {
-                        sink.send(Message::Text(
-                            serde_json::to_string(&ProtocolResponse::error(format!(
-                                "Received range {} which does not overlap with {}",
-                                informant_bounds, monitor_bounds
-                            )))
-                            .unwrap(),
-                        ))
-                        .await
-                        .context(
-                            "failed to notify informant of no overlap between protocol ranges",
-                        )?;
-                        Err(e).context("error determining suitable protocol bounds")?
-                    }
-                }
-            } else {
+            let Message::Text(bounds) = bounds
+                else {
                 // See nhooyr/websocket's implementation of wsjson.Write
                 unreachable!("informant never sends non-text message")
+            };
+            info!(bounds, "received bounds message");
+            assert!(PROTOCOL_MIN_VERSION <= PROTOCOL_MAX_VERSION);
+            // Safe to unwrap because of the assert
+            let monitor_bounds: ProtocolBounds =
+                ProtocolBounds::new(PROTOCOL_MIN_VERSION, PROTOCOL_MAX_VERSION).unwrap();
+            let informant_bounds: ProtocolBounds =
+                serde_json::from_str(&bounds).context("failed to deserialize bounds")?;
+            match monitor_bounds.highest_shared_version(&informant_bounds) {
+                Ok(version) => {
+                    sink.send(Message::Text(
+                        serde_json::to_string(&ProtocolResponse::version(version)).unwrap(),
+                    ))
+                    .await
+                    .context("failed to notify informant of negotiated protocol version")?;
+                    version
+                }
+                Err(e) => {
+                    sink.send(Message::Text(
+                        serde_json::to_string(&ProtocolResponse::error(format!(
+                            "Received range {} which does not overlap with {}",
+                            informant_bounds, monitor_bounds
+                        )))
+                        .unwrap(),
+                    ))
+                    .await
+                    .context("failed to notify informant of no overlap between protocol ranges")?;
+                    Err(e).context("error determining suitable protocol bounds")?
+                }
             }
         } else {
             anyhow::bail!("connection closed while doing protocol handshake")
@@ -93,25 +94,22 @@ impl Dispatcher {
         })
     }
 
-    /// Notify the cgroup manager that we have received upscale. Returns a Receiver
-    /// that the cgroup will send to as a form of acknowledging the upscale.
-    pub async fn notify_upscale(
-        &self,
-        resources: Allocation,
-    ) -> anyhow::Result<oneshot::Receiver<()>> {
+    /// Notify the cgroup manager that we have received upscale and wait for
+    /// the acknowledgement.
+    pub async fn notify_upscale(&self, resources: Allocation) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.notify_upscale_events
             .send((resources, tx))
             .await
             .context("failed to send resources and oneshot sender across channel")?;
-        Ok(rx)
+        rx.await
+            .context("failed to get receipt of upscale from cgroup")
     }
 
     /// Mainly here so we only send actual data. Otherwise, it would be easy to
     /// accidentally serialize something else and send it.
     #[tracing::instrument(skip(self))]
     pub async fn send(&mut self, message: MonitorMessage) -> anyhow::Result<()> {
-        debug!(?message, action = "sending packet");
         let json = serde_json::to_string(&message).context("failed to serialize packet")?;
         self.sink
             .send(Message::Text(json))

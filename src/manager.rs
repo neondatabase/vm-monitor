@@ -4,7 +4,6 @@
 //! the functionality we need.
 
 // Need to think about who is releasing/initing the cgroup
-// Instead of channels, could use condvars and callback?
 // TODO: is it ok to just unwrap channel errors? How could we handle them?
 use std::{
     fmt::Display,

@@ -6,15 +6,15 @@
 use std::sync::Arc;
 use std::{fmt::Debug, mem};
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_std::channel;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{StreamExt, TryFutureExt};
 use tracing::{debug, info, warn};
 
 use crate::{
-    bridge::Dispatcher,
     cgroup::CgroupState,
+    dispatcher::Dispatcher,
     filecache::{FileCacheConfig, FileCacheState},
     get_total_system_memory,
     manager::{Manager, MemoryLimits},
@@ -334,10 +334,6 @@ impl Monitor {
     ) -> anyhow::Result<Option<MonitorMessage>> {
         match inner {
             InformantMessageInner::UpscaleNotification { granted } => {
-                // This is a little funky to read but it allows us to chain a bunch
-                // of futures together without having to manually do an if let/match
-                // after every one of them. The and_then's allow us to sequence
-                // the futures, and the map_err's allow us to attach context.
                 // See the TryFutureExt
                 // trait wonderfully located
                 // in the futures crate
@@ -345,28 +341,24 @@ impl Monitor {
                     .map_err(|e| e.context("failed to handle upscale"))
                     .and_then(|_| self.dispatcher.notify_upscale(granted))
                     .map_err(|e| e.context("failed to notify cgroup of upscale event"))
-                    .and_then(|rx| rx.map_err(|e| anyhow!(e)))
-                    .map_err(|e| e.context("failed to get cgroup manager upscale acknowledgement"))
                     .await
                     .map(|_| {
-                        // TODO: delete this log line when done testing
-                        info!("confirmed receipt of upscale by cgroup manager");
                         Some(MonitorMessage::new(
                             MonitorMessageInner::UpscaleConfirmation {},
                             id,
                         ))
                     })
             }
-            InformantMessageInner::DownscaleRequest { target } => {
-                let (ok, status) = self
-                    .try_downscale(target)
-                    .await
-                    .context("failed to downscale")?;
-                Ok(Some(MonitorMessage::new(
-                    MonitorMessageInner::DownscaleResult { ok, status },
-                    id,
-                )))
-            }
+            InformantMessageInner::DownscaleRequest { target } => self
+                .try_downscale(target)
+                .await
+                .context("failed to downscale")
+                .map(|(ok, status)| {
+                    Some(MonitorMessage::new(
+                        MonitorMessageInner::DownscaleResult { ok, status },
+                        id,
+                    ))
+                }),
             InformantMessageInner::InvalidMessage { error } => {
                 warn!(
                     error,
@@ -408,26 +400,23 @@ impl Monitor {
                 msg = self.dispatcher.source.next() => {
                     if let Some(msg) = msg {
                         debug!(packet = ?msg, action = "receiving packet");
-                        // Maybe have another thread do this work? Can lead to out of order?
+                        // TODO: do we need to offload this work to another thread?
                         match msg {
                             Ok(msg) => {
-                                // Inlined for borrow checker reasons:
-                                // We only want to borrow self for as short a time as possible
-                                // and a closure borrows self for it's entire lifetime - which
-                                // is too long and prevents reading/writing the stream.
                                 let packet: InformantMessage = match msg {
                                     Message::Text(text) => {
                                         serde_json::from_str(&text).context("failed to deserialize text message")?
                                     }
-                                    Message::Binary(bin) => {
-                                        serde_json::from_slice(&bin).context("failed to deserialize binary message")?
-                                    }
-                                    _ => continue,
+                                    other => {
+                                        warn!(
+                                            message=?other,
+                                            "informant should only send text messages but received different type"
+                                        );
+                                        continue
+                                    },
                                 };
 
-                                let out = match self
-                                    .process_packet(packet.clone())
-                                    .await {
+                                let out = match self.process_packet(packet.clone()).await {
                                     Ok(Some(out)) => out,
                                     Ok(None) => continue,
                                     Err(e) => {

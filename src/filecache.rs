@@ -1,4 +1,5 @@
-// TODO: should all fields be pub(crate)?
+//! This file handles all the logic around configuring and scaling the Postgres
+//! file cache.
 
 use crate::MiB;
 use anyhow::Context;
