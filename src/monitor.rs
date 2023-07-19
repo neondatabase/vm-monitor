@@ -183,8 +183,9 @@ impl Monitor {
 
         let requested_mem = target.mem;
         let usable_system_memory = requested_mem.saturating_sub(self.config.sys_buffer_bytes);
-        let expected_file_cache_mem_usage = &self
+        let expected_file_cache_mem_usage = self
             .filecache
+            .as_ref()
             .map(|file_cache| file_cache.config.calculate_cache_size(usable_system_memory))
             .unwrap_or(0);
         let mut new_cgroup_mem_high = 0;
@@ -221,7 +222,7 @@ impl Monitor {
             }
 
             let actual_usage = file_cache
-                .set_file_cache_size(*expected_file_cache_mem_usage)
+                .set_file_cache_size(expected_file_cache_mem_usage)
                 .await
                 .context("failed to set file cache size")?;
             file_cache_mem_usage = actual_usage;
@@ -233,7 +234,7 @@ impl Monitor {
         if let Some(cgroup) = &self.cgroup {
             let available_memory = usable_system_memory - file_cache_mem_usage;
 
-            if file_cache_mem_usage != *expected_file_cache_mem_usage {
+            if file_cache_mem_usage != expected_file_cache_mem_usage {
                 new_cgroup_mem_high = cgroup.config.calculate_memory_high_value(available_memory);
             }
 
