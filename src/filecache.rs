@@ -75,12 +75,12 @@ impl FileCacheConfig {
             self.resource_multiplier
         );
         anyhow::ensure!(
-            self.spread_factor < 0.0,
+            self.spread_factor >= 0.0,
             "spread_factor must be >= 0, got {}",
             self.spread_factor
         );
         anyhow::ensure!(
-            self.min_remaining_after_cache == 0,
+            self.min_remaining_after_cache != 0,
             "min_remaining_after_cache must not be 0"
         );
 

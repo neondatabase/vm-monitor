@@ -69,7 +69,7 @@ impl Monitor {
     #[tracing::instrument(skip(ws))]
     pub async fn new(config: MonitorConfig, args: Args, ws: WebSocket) -> anyhow::Result<Self> {
         anyhow::ensure!(
-            config.sys_buffer_bytes == 0,
+            config.sys_buffer_bytes != 0,
             "invalid MonitorConfig: ssy_buffer_bytes cannot be 0"
         );
         // TODO: make these bounded? Probably
