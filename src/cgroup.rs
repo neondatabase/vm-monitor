@@ -7,7 +7,7 @@ use tracing::info;
 use crate::{
     manager::{Manager, MemoryLimits},
     mib,
-    transport::Allocation,
+    protocol::Allocation,
     LogContext, MiB,
 };
 

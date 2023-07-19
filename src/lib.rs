@@ -61,7 +61,6 @@ where
 /// Code that interfaces with agent
 pub mod bridge;
 pub mod protocol;
-pub mod transport;
 
 pub mod cgroup;
 pub mod filecache;

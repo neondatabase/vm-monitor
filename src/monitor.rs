@@ -12,9 +12,6 @@ use axum::extract::ws::{Message, WebSocket};
 use futures_util::{StreamExt, TryFutureExt};
 use tracing::{debug, info, warn};
 
-use crate::transport::{
-    InformantMessage, InformantMessageInner, MonitorMessage, MonitorMessageInner,
-};
 use crate::{
     bridge::Dispatcher,
     cgroup::CgroupState,
@@ -22,7 +19,9 @@ use crate::{
     get_total_system_memory,
     manager::{Manager, MemoryLimits},
     mib,
-    transport::Allocation,
+    protocol::{
+        Allocation, InformantMessage, InformantMessageInner, MonitorMessage, MonitorMessageInner,
+    },
     Args, LogContext, MiB,
 };
 

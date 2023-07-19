@@ -15,11 +15,11 @@ use tokio::sync::oneshot;
 use tracing::{debug, info};
 
 use crate::{
+    protocol::{Allocation, MonitorMessage},
     protocol::{
         ProtocolBounds, ProtocolResponse, ProtocolVersion, PROTOCOL_MAX_VERSION,
         PROTOCOL_MIN_VERSION,
     },
-    transport::*,
     LogContext,
 };
 
