@@ -20,7 +20,7 @@ use tracing::info;
 use crate::{
     protocol::{Allocation, MonitorMessage},
     protocol::{
-        ProtocolBounds, ProtocolResponse, ProtocolVersion, PROTOCOL_MAX_VERSION,
+        ProtocolRange, ProtocolResponse, ProtocolVersion, PROTOCOL_MAX_VERSION,
         PROTOCOL_MIN_VERSION,
     },
 };
@@ -36,6 +36,12 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
+    /// Creates a new dispatcher using the passed-in connection. Performs a
+    /// negotiation with the informant to determine a suitable protocol range.
+    /// This consists of two steps:
+    /// 1. Wait for the informant to sent the range of protocols it supports.
+    /// 2. Send a protocol version that works for us as well or an error if there
+    ///    is no compatible version.
     pub async fn new(
         stream: WebSocket,
         notify_upscale_events: Sender<(Allocation, oneshot::Sender<()>)>,
@@ -45,21 +51,25 @@ impl Dispatcher {
 
         // Figure out what protocol to use
         info!("waiting for informant to send protocol range");
-        let proto_bounds = if let Some(bounds) = source.next().await {
-            let bounds = bounds.context("failed to read bounds off connection")?;
-            let Message::Text(bounds) = bounds
+        let proto_range = if let Some(range) = source.next().await {
+            let range = range.context("failed to read range off connection")?;
+            let Message::Text(range) = range
                 else {
                 // See nhooyr/websocket's implementation of wsjson.Write
                 unreachable!("informant never sends non-text message")
             };
-            info!(bounds, "received bounds message");
+
             assert!(PROTOCOL_MIN_VERSION <= PROTOCOL_MAX_VERSION);
             // Safe to unwrap because of the assert
-            let monitor_bounds: ProtocolBounds =
-                ProtocolBounds::new(PROTOCOL_MIN_VERSION, PROTOCOL_MAX_VERSION).unwrap();
-            let informant_bounds: ProtocolBounds =
-                serde_json::from_str(&bounds).context("failed to deserialize bounds")?;
-            match monitor_bounds.highest_shared_version(&informant_bounds) {
+            let monitor_range: ProtocolRange =
+                ProtocolRange::new(PROTOCOL_MIN_VERSION, PROTOCOL_MAX_VERSION).unwrap();
+
+            let informant_range: ProtocolRange =
+                serde_json::from_str(&range).context("failed to deserialize range")?;
+
+            info!(range = ?informant_range, "received protocol range");
+
+            match monitor_range.highest_shared_version(&informant_range) {
                 Ok(version) => {
                     sink.send(Message::Text(
                         serde_json::to_string(&ProtocolResponse::version(version)).unwrap(),
@@ -72,13 +82,13 @@ impl Dispatcher {
                     sink.send(Message::Text(
                         serde_json::to_string(&ProtocolResponse::error(format!(
                             "Received range {} which does not overlap with {}",
-                            informant_bounds, monitor_bounds
+                            informant_range, monitor_range
                         )))
                         .unwrap(),
                     ))
                     .await
                     .context("failed to notify informant of no overlap between protocol ranges")?;
-                    Err(e).context("error determining suitable protocol bounds")?
+                    Err(e).context("error determining suitable protocol range")?
                 }
             }
         } else {
@@ -90,12 +100,13 @@ impl Dispatcher {
             source,
             notify_upscale_events,
             request_upscale_events,
-            proto_version: proto_bounds,
+            proto_version: proto_range,
         })
     }
 
     /// Notify the cgroup manager that we have received upscale and wait for
     /// the acknowledgement.
+    #[tracing::instrument(skip(self))]
     pub async fn notify_upscale(&self, resources: Allocation) -> anyhow::Result<()> {
         let (tx, rx) = oneshot::channel();
         self.notify_upscale_events

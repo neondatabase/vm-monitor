@@ -97,7 +97,7 @@ impl Monitor {
         // allocated to the file cache is appropriately taken into account when we decide the cgroup's
         // memory limits.
         if let Some(connstr) = args.file_cache_conn_str {
-            info!(action = "initializing file cache");
+            info!("initializing file cache");
             let config: FileCacheConfig = Default::default();
             if !config.in_memory {
                 panic!("file cache not in-memory implemented")
@@ -116,7 +116,7 @@ impl Monitor {
             info!(
                 initial = mib(size),
                 new = mib(new_size),
-                action = "setting initial file cache size",
+                "setting initial file cache size",
             );
 
             // note: even if size == new_size, we want to explicitly set it, just
@@ -131,13 +131,13 @@ impl Monitor {
         }
 
         if let Some(name) = args.cgroup {
-            info!(action = "creating manager");
+            info!("creating manager");
             let manager = Manager::new(name)
                 .await
                 .context("failed to create new manager")?;
             let config = Default::default();
 
-            info!(action = "creating cgroup state");
+            info!("creating cgroup state");
             let mut cgroup_state =
                 CgroupState::new(manager, config, notified_recv, requesting_send);
 
@@ -169,7 +169,7 @@ impl Monitor {
     /// Attempt to downscale filecache + cgroup
     #[tracing::instrument(skip(self))]
     pub async fn try_downscale(&self, target: Allocation) -> anyhow::Result<(bool, String)> {
-        info!(?target, action = "attempting to downscale");
+        info!(?target, "attempting to downscale");
 
         // Nothing to adjust
         if self.cgroup.is_none() && self.filecache.is_none() {
@@ -207,7 +207,7 @@ impl Monitor {
                     mib(cgroup.config.memory_high_buffer_bytes)
                 );
 
-                info!(status, action = "discontinuing downscale");
+                info!(status, "discontinuing downscale");
 
                 return Ok((false, status));
             }
@@ -265,7 +265,7 @@ impl Monitor {
     /// Handle new resources
     #[tracing::instrument(skip(self))]
     pub async fn handle_upscale(&self, resources: Allocation) -> anyhow::Result<()> {
-        info!(?resources, action = "handling agent-granted upscale");
+        info!(?resources, "handling agent-granted upscale");
 
         if self.filecache.is_none() && self.cgroup.is_none() {
             info!("no action needed for upscale (no cgroup or file cache enabled)");
@@ -286,7 +286,7 @@ impl Monitor {
             info!(
                 target = mib(expected_usage),
                 total = mib(new_mem),
-                action = "npdating file cache size",
+                "npdating file cache size",
             );
 
             let actual_usage = file_cache
@@ -311,7 +311,7 @@ impl Monitor {
                 target = mib(new_cgroup_mem_high),
                 total = mib(new_mem),
                 name = cgroup.manager.name,
-                action = "updating cgroup memory.high",
+                "updating cgroup memory.high",
             );
             let limits = MemoryLimits::new(new_cgroup_mem_high, available_memory);
             cgroup
@@ -376,7 +376,7 @@ impl Monitor {
     // TODO: don't propagate errors, probably just warn!?
     #[tracing::instrument(skip(self))]
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        info!(action = "starting dispatcher");
+        info!("starting dispatcher");
         loop {
             tokio::select! {
                 // we need to propagate an upscale request
@@ -399,7 +399,7 @@ impl Monitor {
                 // there is a packet from the informant
                 msg = self.dispatcher.source.next() => {
                     if let Some(msg) = msg {
-                        debug!(packet = ?msg, action = "receiving packet");
+                        debug!(packet = ?msg, "receiving packet");
                         // TODO: do we need to offload this work to another thread?
                         match msg {
                             Ok(msg) => {

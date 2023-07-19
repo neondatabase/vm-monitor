@@ -120,7 +120,7 @@ impl Manager {
 
         let cgroup = Cgroup::load(hierarchies::auto(), &name);
 
-        info!(action = "creating file watcher for memory.high events");
+        info!("creating file watcher for memory.high events");
 
         // Set up a watcher that notifies on changes to memory.events
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
@@ -165,10 +165,10 @@ impl Manager {
                     _ = future::ready(()) => {
                         info!(
                             wait = ?min_wait,
-                            action = "respecting minimum wait of {min_wait:?} ms before restarting memory.events listener",
+                            "respecting minimum wait of {min_wait:?} ms before restarting memory.events listener",
                         );
                         timer.as_mut().await;
-                        info!(action = "restarting memory.events listener")
+                        info!("restarting memory.events listener")
                     }
                 };
 
@@ -228,7 +228,7 @@ impl Manager {
         let clone = Arc::clone(&memory_update_lock);
         // Start deadlock checker
         thread::spawn(move || loop {
-            trace!(action = "waiting 1 second to take memory update lock");
+            trace!("waiting 1 second to take memory update lock");
             std::thread::sleep(Duration::from_millis(1000));
             let _lock = clone.lock().unwrap();
             trace!("memory update lock taken and released")
@@ -255,7 +255,7 @@ impl Manager {
     pub fn flush_high_event(&self) -> anyhow::Result<()> {
         match self.highs.try_recv() {
             Ok(high) => {
-                info!(high, action = "flushed memory.high event");
+                info!(high, "flushed memory.high event");
                 Ok(())
             }
             Err(TryRecvError::Empty) => Ok(()), // Nothing to flush, all good
@@ -348,10 +348,7 @@ impl Manager {
         let memory = self.memory().context("failed to get memory subsystem")?;
 
         let _lock = self.memory_update_lock.lock().unwrap();
-        info!(
-            action = "getting current memory usage",
-            "acquired lock on cgroup memory.* files"
-        );
+        info!("acquired lock for getting current memory usage",);
         Ok(memory.memory_stat().usage_in_bytes)
     }
 
@@ -361,10 +358,7 @@ impl Manager {
         let memory = self.memory().context("failed to get memory subsystem")?;
 
         let _lock = self.memory_update_lock.lock().unwrap();
-        info!(
-            action = "setting memory.high",
-            "acquired lock on cgroup memory.* files"
-        );
+        info!("acquired lock for setting memory.high",);
         memory
             .set_mem(cgroups_rs::memory::SetMemory {
                 low: None,
@@ -383,15 +377,8 @@ impl Manager {
             .context("failed to get memory subsystem while setting memory limits")?;
 
         let _lock = self.memory_update_lock.lock().unwrap();
-        info!(
-            action = "setting memory.{high, max}",
-            "acquired lock on cgroup memory.* files"
-        );
-        info!(
-            limits.high,
-            limits.max,
-            action = "writing new memory limits",
-        );
+        info!("acquired lock for setting memory.{{high, max}}",);
+        info!(limits.high, limits.max, "writing new memory limits",);
         memory
             .set_mem(cgroups_rs::memory::SetMemory {
                 min: None,
@@ -411,10 +398,7 @@ impl Manager {
             .context("failed to get memory subsystem while getting memory statistics")?;
         let high = {
             let _ = self.memory_update_lock.lock();
-            info!(
-                action = "getting memory.high",
-                "acquired lock on cgroup memory.* files"
-            );
+            info!("acquired lock for getting memory.high",);
             memory
                 .get_mem()
                 .map(|mem| mem.high)

@@ -115,15 +115,12 @@ impl CgroupState {
 
     #[tracing::instrument(skip(self))]
     pub async fn set_memory_limits(&mut self, available_memory: u64) -> anyhow::Result<()> {
-        info!(
-            name = self.manager.name,
-            action = "setting memory limits for cgroup"
-        );
+        info!(name = self.manager.name, "setting memory limits for cgroup");
         let new_high = self.config.calculate_memory_high_value(available_memory);
         info!(
             self.manager.name,
             memory = mib(new_high),
-            action = "setting cgroup memory",
+            "setting cgroup memory",
         );
 
         self.manager.flush_high_event()?;
@@ -143,7 +140,7 @@ impl CgroupState {
         // FIXME: we should have "proper" error handling instead of just panicking. It's hard to
         // determine what the correct behavior should be if a cgroup operation fails, though.
         let state = Arc::clone(self);
-        info!(state.manager.name, action = "starting main signals loop");
+        info!(state.manager.name, "starting main signals loop");
         tokio::spawn(async move {
             let mut waiting_on_upscale = false;
             let wait_to_increase_memory_high = tokio::time::sleep(Duration::ZERO);
@@ -195,7 +192,6 @@ impl CgroupState {
                             _ = future::ready(()) => {
                                 if !waiting_on_upscale {
                                     info!(
-                                        action = "requesting upscale",
                                         "received memory.high event, but too soon to re-freeze; requesting upscale",
                                     );
 
@@ -216,7 +212,7 @@ impl CgroupState {
                                         }
                                         _ = future::ready(()) => {
                                             // TODO: could just unwrap
-                                            info!(action = "requesting upscale");
+                                            info!("requesting upscale");
                                             match state.request_upscale().await {
                                                 Ok(_) => {},
                                                 Err(e) => panic!("error requesting upscale {e}")
@@ -228,7 +224,6 @@ impl CgroupState {
                                         biased;
                                         _ = &mut wait_to_increase_memory_high => {
                                             info!(
-                                                action = "increasing memory.high",
                                                 "received memory.high event, but too soon to refreeze and waiting on upscale; increasing memory.high"
                                             );
                                             tokio::select! {
@@ -248,7 +243,7 @@ impl CgroupState {
                                                         return;
                                                     }
                                                 _ = future::ready(()) => {
-                                                    info!(action = "requesting upscale");
+                                                    info!("requesting upscale");
                                                     // TODO: could just unwrap
                                                     match state.request_upscale().await {
                                                         Ok(_) => {},
@@ -266,7 +261,7 @@ impl CgroupState {
                                             info!(
                                                  old = mib(mem_high),
                                                  new = mib(new_high),
-                                                 action = "updating memory.high (MiB)",
+                                                 "updating memory.high (MiB)",
                                             );
 
                                             if let Err(e) = state.manager.set_high_bytes(new_high) {
@@ -314,10 +309,7 @@ impl CgroupState {
             _ = future::ready(()) => {}
         };
 
-        info!(
-            action = "freezing",
-            "received memory.high event; freezing cgroup"
-        );
+        info!("received memory.high event; freezing cgroup");
 
         self.manager
             .freeze()
@@ -329,7 +321,6 @@ impl CgroupState {
 
         info!(
             wait = ?self.config.max_upscale_wait,
-            action = "waiting",
             "sending request for immediate upscaling; waiting",
         );
 
@@ -345,7 +336,6 @@ impl CgroupState {
                 total_wait = start.elapsed();
                 info!(
                     wait = total_wait.as_millis(),
-                    action = "thawing",
                     "received notification that upscale occured after {total_wait:?} ms; thawing cgroup",
                 );
                 match bundle {
@@ -364,7 +354,6 @@ impl CgroupState {
                 total_wait = start.elapsed();
                 info!(
                     wait = total_wait.as_millis(),
-                    action = "thawing",
                     "timeout after {total_wait:?} ms waiting for upscale; thawing cgroup",
                 )
             }

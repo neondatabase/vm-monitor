@@ -155,12 +155,12 @@ impl fmt::Display for ProtocolVersion {
 /// A set of protocol bounds that determines what we are speaking. An invariant
 /// that must be maintained is that min <= max. These bounds are inclusive.
 #[derive(Deserialize, Debug)]
-pub struct ProtocolBounds {
+pub struct ProtocolRange {
     min: ProtocolVersion,
     max: ProtocolVersion,
 }
 
-impl fmt::Display for ProtocolBounds {
+impl fmt::Display for ProtocolRange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.min == self.max {
             f.write_fmt(format_args!("{}", self.max))
@@ -170,7 +170,7 @@ impl fmt::Display for ProtocolBounds {
     }
 }
 
-impl ProtocolBounds {
+impl ProtocolRange {
     /// Create a new `ProtocolBounds`. Returns None if min > max
     pub fn new(min: ProtocolVersion, max: ProtocolVersion) -> Option<Self> {
         if min > max {

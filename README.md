@@ -20,6 +20,5 @@ it.
 
 # TODOs
 [ ]: rewrite internals to put all signals on a channel instead of using selects
-[ ]: merge `transport.rs` and `protocol.rs`
 
 [autoscaling]: https://github.com/neondatabase/autoscaling
