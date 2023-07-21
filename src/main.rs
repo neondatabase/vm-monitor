@@ -9,7 +9,7 @@ use axum::{
     extract::{ws::WebSocket, State, WebSocketUpgrade},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{any, get},
     Router, Server,
 };
 use clap::Parser;
@@ -36,7 +36,7 @@ async fn main() -> anyhow::Result<()> {
         // monitor, the agent can still hit the /register endpoint. If it gets
         // a 404 back, it'll know to git the /monitor endpoint and normal
         // functioning can follow.
-        .route("/register", get(register))
+        .route("/register", any(register))
         // This route gets upgraded to a websocket connection. We only support
         // connection at a time. We enforce this using global app state.
         // True indicates we are connected to someone and False indicates we can
