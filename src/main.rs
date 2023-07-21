@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("server exited")?;
 
-    info!("server listening on {addr}")
+    info!("server listening on {addr}");
 
     Ok(())
 }
