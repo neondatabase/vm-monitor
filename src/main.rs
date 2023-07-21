@@ -46,13 +46,19 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
     let addr = args.addr();
-    Server::try_bind(&addr.parse().expect("parsing address should not fail"))
-        .with_context(|| format!("failed to bind to {addr}"))?
+    let server = Server::try_bind(
+        &addr
+            .parse()
+            .with_context(|| format!("failed to parse address: '{addr}'"))?,
+    )
+    .with_context(|| format!("failed to bind to {addr}"))?;
+
+    info!("server listening on {addr}");
+
+    server
         .serve(app.into_make_service())
         .await
         .context("server exited")?;
-
-    info!("server listening on {addr}");
 
     Ok(())
 }
