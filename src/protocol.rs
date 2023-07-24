@@ -87,6 +87,10 @@ pub enum MonitorMessageInner {
         #[serde(rename = "Status")]
         status: String,
     },
+    /// Part of the bidirectional heartbeat. The heartbeat is initiated by the
+    /// informant.
+    /// *Note*: this is a struct variant because of the way go serializes struct{}
+    HealthCheck {}
 }
 
 /// A message received form the informant.
@@ -115,6 +119,10 @@ pub enum InformantMessageInner {
     /// A request to reduce resource usage. We should response with a `DownscaleResult`,
     /// when done.
     DownscaleRequest { target: Allocation },
+    /// Part of the bidirectional heartbeat. The heartbeat is initiated by the
+    /// informant.
+    /// *Note*: this is a struct variant because of the way go serializes struct{}
+    HealthCheck {}
 }
 
 /// Represents the resources granted to a VM.

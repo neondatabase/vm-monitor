@@ -378,6 +378,10 @@ impl Monitor {
                 warn!(error, id, "informant experienced an internal error");
                 Ok(None)
             }
+            InformantMessageInner::HealthCheck {} => Ok(Some(MonitorMessage::new(
+                MonitorMessageInner::HealthCheck {},
+                id,
+            ))),
         }
     }
 
