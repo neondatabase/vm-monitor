@@ -6,10 +6,11 @@
 use std::sync::Arc;
 use std::{fmt::Debug, mem};
 
-use anyhow::Context;
+use anyhow::{bail, Context};
 use async_std::channel;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::{StreamExt, TryFutureExt};
+use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
 use crate::{
@@ -36,6 +37,10 @@ pub struct Monitor {
 
     /// We "mint" new package ids by incrementing this counter and taking the value.
     counter: usize,
+
+    /// A signal to kill the main thread produced by `self.run()`. This is triggered
+    /// when the server receives a new connection.
+    kill: broadcast::Receiver<()>,
 }
 
 #[derive(Debug)]
@@ -67,7 +72,12 @@ impl Default for MonitorConfig {
 impl Monitor {
     /// Create a new monitor.
     #[tracing::instrument(skip(ws))]
-    pub async fn new(config: MonitorConfig, args: Args, ws: WebSocket) -> anyhow::Result<Self> {
+    pub async fn new(
+        config: MonitorConfig,
+        args: Args,
+        ws: WebSocket,
+        kill: broadcast::Receiver<()>,
+    ) -> anyhow::Result<Self> {
         anyhow::ensure!(
             config.sys_buffer_bytes != 0,
             "invalid MonitorConfig: ssy_buffer_bytes cannot be 0"
@@ -89,6 +99,7 @@ impl Monitor {
             cgroup: None,
             dispatcher,
             counter: 0,
+            kill,
         };
 
         let mut file_cache_reserved_bytes = 0;
@@ -376,6 +387,12 @@ impl Monitor {
         info!("starting dispatcher");
         loop {
             tokio::select! {
+                signal = self.kill.recv() => {
+                    match signal {
+                        Ok(()) => return Ok(()),
+                        Err(e) => bail!("failed to receive kill signal: {e}")
+                    }
+                }
                 // we need to propagate an upscale request
                 sender = self.dispatcher.request_upscale_events.recv() => {
                     match sender {

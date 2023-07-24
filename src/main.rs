@@ -1,7 +1,4 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
+use std::time::Duration;
 
 use anyhow::Context;
 use axum::{
@@ -13,7 +10,8 @@ use axum::{
     Router, Server,
 };
 use clap::Parser;
-use tracing::{info, warn};
+use tokio::sync::broadcast;
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use vm_monitor::monitor::Monitor;
 use vm_monitor::Args;
@@ -29,6 +27,10 @@ async fn main() -> anyhow::Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
+    // This channel is used to close old connections. When a new connection is
+    // made, we send a message signalling to the old connection to close.
+    let (sender, _) = tokio::sync::broadcast::channel::<()>(1);
+
     let app = Router::new()
         // Current, the informant exposes a /register endpoint. At the time of
         // writing, we need to support both agent->informant->monitor and
@@ -42,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
         // True indicates we are connected to someone and False indicates we can
         // receive connections.
         .route("/monitor", get(ws_handler))
-        .with_state(Arc::new(AtomicBool::new(false)));
+        .with_state(sender);
 
     let args = Args::parse();
     let addr = args.addr();
@@ -75,48 +77,48 @@ async fn register() -> Response {
 }
 
 /// Handles incoming websocket connections. If we are already to connected to
-/// an informant, returns a 409 (conflict) response, as only one informant can
-/// be instructing is on what do at a time. Otherwise, starts the monitor.
+/// an informant, we stop the monitor for that connection (thus killing it),
+/// and create a new monitor for the new connection.
 #[tracing::instrument(name = "/monitor", skip(ws))]
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AtomicBool>>) -> Response {
-    if !state.fetch_or(true, Ordering::AcqRel) {
-        info!("receiving websocket connection");
-        ws.on_upgrade(|ws| start_monitor(ws, state))
-    } else {
-        warn!("already connected to an informant over websocket; sending 409");
-        Response::builder()
-            .status(StatusCode::CONFLICT)
-            .body(Full::from(
-                "monitor may only be connected to one informant at a time",
-            ))
-            .expect("making a body from a string literal should never fail")
-            .into_response()
-    }
+async fn ws_handler(ws: WebSocketUpgrade, State(sender): State<broadcast::Sender<()>>) -> Response {
+    // Kill the old monitor
+    warn!("already connected to an informant over websocket; closing old connection");
+    let _ = sender.send(());
+
+    // Start the new one. Wow, the cycle of death and rebirth
+    let closer = sender.subscribe();
+    ws.on_upgrade(|ws| start_monitor(ws, closer))
 }
 
 // TODO: should these warns be hard errors? In theory they can happen in normal
 // operation if we're switching agents
 /// Starts the monitor. If startup fails or the monitor exits, and error will
 /// be logged and our internal state will be reset to allow for new connections.
-#[tracing::instrument(skip(ws))]
-async fn start_monitor(ws: WebSocket, state: Arc<AtomicBool>) {
+async fn start_monitor(ws: WebSocket, kill: broadcast::Receiver<()>) {
     let args = Args::parse();
-    let mut monitor = match Monitor::new(Default::default(), args, ws).await {
-        Ok(monitor) => monitor,
-        Err(e) => {
-            warn!(error = ?e, "failed to create monitor");
-            state.fetch_and(false, Ordering::AcqRel);
+    let monitor = tokio::time::timeout(
+        Duration::from_secs(2),
+        Monitor::new(Default::default(), args, ws, kill),
+    )
+    .await;
+    let mut monitor = match monitor {
+        Ok(Ok(monitor)) => monitor,
+        Ok(Err(error)) => {
+            error!(?error, "failed to create monitor");
+            return;
+        }
+        Err(elapsed) => {
+            error!(
+                ?elapsed,
+                "creating monitor timed out (probably waiting to receive protocol range)"
+            );
             return;
         }
     };
     info!("connected to informant");
+
     match monitor.run().await {
-        Ok(_) => {
-            unreachable!("Monitor stopped running but returned Ok(())")
-        }
-        Err(e) => {
-            warn!(error = ?e, "monitor terminated");
-            state.fetch_and(false, Ordering::AcqRel);
-        }
+        Ok(()) => info!("monitor was killed due to new connection"),
+        Err(e) => error!(error = ?e, "monitor terminated by itself"),
     }
 }
