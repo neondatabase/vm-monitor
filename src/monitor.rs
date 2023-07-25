@@ -338,8 +338,10 @@ impl Monitor {
     #[tracing::instrument(skip(self))]
     pub async fn process_packet(
         &mut self,
-        InformantMessage { inner, id }: InformantMessage,
+        message: InformantMessage,
     ) -> anyhow::Result<Option<MonitorMessage>> {
+        info!(?message, "received message from informant");
+        let InformantMessage { inner, id } = message;
         match inner {
             InformantMessageInner::UpscaleNotification { granted } => {
                 // See the TryFutureExt
