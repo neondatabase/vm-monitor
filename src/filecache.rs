@@ -1,15 +1,15 @@
 //! Logic for configuring and scaling the Postgres file cache.
 
 use crate::MiB;
-use anyhow::Context;
-use tokio_postgres::Client;
-use tokio_postgres::NoTls;
+use anyhow::{anyhow, Context};
+use tokio_postgres::{Client, NoTls, Row, types::ToSql};
 use tracing::{error, info};
 
 /// Manages Postgres' file cache by keeping a connection open.
 #[derive(Debug)]
 pub struct FileCacheState {
     client: Client,
+    conn_str: String,
     pub(crate) config: FileCacheConfig,
 }
 
@@ -160,41 +160,95 @@ impl FileCacheState {
         });
 
         config.validate().context("file cache config is invalid")?;
-        Ok(Self { client, config })
+
+        let conn_str = conn_str.to_string();
+        Ok(Self {
+            client,
+            config,
+            conn_str,
+        })
+    }
+
+    /// Execute a query with a retry if necessary.
+    ///
+    /// If the initial query fails, we restart the database connection and attempt
+    /// if again.
+    pub async fn query_with_retry(
+        &mut self,
+        statement: &str,
+        params: &[&(dyn ToSql + Sync)],
+    ) -> anyhow::Result<Vec<Row>> {
+        match self
+            .client
+            .query(statement, params)
+            .await
+            .context("failed to execute query")
+        {
+            Ok(rows) => Ok(rows),
+            Err(e) => {
+                error!(error = ?e, "postgres error: {e} -> retrying");
+                let (client, conn) = tokio_postgres::connect(&self.conn_str, NoTls)
+                    .await
+                    .context("failed to restart to postgres client")?;
+
+                // The connection object performs the actual communication with the database,
+                // so spawn it off to run on its own. See tokio-postgres docs.
+                tokio::spawn(async move {
+                    if let Err(e) = conn.await {
+                        error!(error = ?e, "postgres error: {e}")
+                    }
+                });
+
+                info!("successfully reconnected to postgres client");
+
+                // Replace the old client and attempt the query with the new one
+                self.client = client;
+                self.client
+                    .query(statement, params)
+                    .await
+                    .context("failed to execute query a second time")
+            }
+        }
     }
 
     /// Get the current size of the file cache.
     #[tracing::instrument]
-    pub async fn get_file_cache_size(&self) -> anyhow::Result<u64> {
-        self.client
-            .query_one(
-                "SELECT pg_size_bytes(current_setting('neon.file_cache_size_limit'));",
-                &[],
-            )
-            .await
-            .context("failed to query pg for file cache size")?
-            // pg_size_bytes returns a bigint which is the same as an i64.
-            .try_get::<_, i64>(0)
-            // Since the size of the table is not negative, the cast is sound.
-            .map(|bytes| bytes as u64)
-            .context("failed to extract file cache size from query result")
+    pub async fn get_file_cache_size(&mut self) -> anyhow::Result<u64> {
+        self.query_with_retry(
+            // The file cache GUC variable is in MiB, but the conversion with
+            // pg_size_bytes means that the end result we get is in bytes.
+            "SELECT pg_size_bytes(current_setting('neon.file_cache_size_limit'));",
+            &[],
+        )
+        .await
+        .context("failed to query pg for file cache size")?
+        .first()
+        .ok_or_else(|| anyhow!("file cache size query returned no rows"))?
+        // pg_size_bytes returns a bigint which is the same as an i64.
+        .try_get::<_, i64>(0)
+        // Since the size of the table is not negative, the cast is sound.
+        .map(|bytes| bytes as u64)
+        .context("failed to extract file cache size from query result")
     }
 
     /// Attempt to set the file cache size, returning the size it was actually
     /// set to.
     #[tracing::instrument]
-    pub async fn set_file_cache_size(&self, num_bytes: u64) -> anyhow::Result<u64> {
+    pub async fn set_file_cache_size(&mut self, num_bytes: u64) -> anyhow::Result<u64> {
         let max_bytes = self
-            .client
-            .query_one(
+            // The file cache GUC variable is in MiB, but the conversion with pg_size_bytes
+            // means that the end result we get is in bytes.
+            .query_with_retry(
                 "SELECT pg_size_bytes(current_setting('neon.max_file_cache_size'));",
                 &[],
             )
             .await
             .context("failed to query pg for max file cache size")?
+            .first()
+            .ok_or_else(|| anyhow!("max file cache size query returned no rows"))?
             .try_get::<_, i64>(0)
             .map(|bytes| bytes as u64)
-            .context("failed to extract amx file cache size form query result")?;
+            .context("failed to extract max file cache size from query result")?;
 
         let max_mb = max_bytes / MiB;
         let num_mb = (num_bytes / MiB).max(max_mb);
@@ -211,14 +265,20 @@ impl FileCacheState {
             "updating file cache size {capped}",
         );
 
+        // note: even though the normal ways to get the cache size produce values with trailing "MB"
+        // (hence why we call pg_size_bytes in `get_file_cache_size`'s query), the format
+        // it expects to set the value is "integer number of MB" without trailing units.
+        // For some reason, this *really* wasn't working with normal arguments, so that's
+        // why we're constructing the query here.
         self.client
-            .execute(
+            .query(
                 &format!("ALTER SYSTEM SET neon.file_cache_size_limit = {};", num_mb),
                 &[],
             )
             .await
             .context("failed to change file cache size limit")?;
 
+        // must use pg_reload_conf to have the settings change take effect
         self.client
             .execute("SELECT pg_reload_conf();", &[])
             .await
