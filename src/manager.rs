@@ -80,6 +80,19 @@ pub enum MemoryEvent {
     OomGroupKill,
 }
 
+impl MemoryEvent {
+    fn as_str(&self) -> &str {
+        match self {
+            MemoryEvent::Low => "low",
+            MemoryEvent::High => "high",
+            MemoryEvent::Max => "max",
+            MemoryEvent::Oom => "oom",
+            MemoryEvent::OomKill => "oom_kill",
+            MemoryEvent::OomGroupKill => "oom_group_kill",
+        }
+    }
+}
+
 impl Display for MemoryEvent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -276,12 +289,19 @@ impl Manager {
         // ...
         contents
             .lines()
+            // REVIEW: `filter_map` means we're ignoring lines that don't have a
+            // space in them? Is that what we want? every line should have a space!
+            // (maybe to handle the trailing newline? but that's still ok!)
+            // felix=> not sure what you mean by this. All lines we care about
+            // have space and will get split correctly.
             .filter_map(|s| s.split_once(' '))
-            .find(|(e, _)| *e == event.to_string())
-            .map(|(_, count)| count.parse::<u64>())
-            .ok_or(anyhow!("error getting memory.{event} event count"))
-            .with_context(|| format!("failed to find entry for memory.{event} events in {path}"))?
-            .context("failed to parse memory.high as u64")
+            .find(|(e, _)| *e == event.as_str())
+            .ok_or_else(|| anyhow!("failed to find entry for memory.{event} events in {path}"))
+            .and_then(|(_, count)| {
+                count
+                    .parse::<u64>()
+                    .with_context(|| format!("failed to parse memory.{event} as u64"))
+            })
     }
 
     /// Retrieve whether cgroup is frozen or thawed.
