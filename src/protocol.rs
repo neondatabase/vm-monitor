@@ -1,5 +1,4 @@
-//! Module for types that interface with the informant - types representing
-//! protocols and types for actual messages sent to the informant.
+//! Types representing protocols and actual informant-monitor messages.
 //!
 //! The pervasive use of serde modifiers throughout this module is to ease
 //! serialization on the go side. Because go does not have enums (which model
