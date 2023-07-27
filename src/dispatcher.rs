@@ -82,7 +82,10 @@ impl Dispatcher {
             bail!("received non-text message during proocol handshake: {message:?}")
         };
 
-        let monitor_range = ProtocolRange::new(PROTOCOL_MIN_VERSION, PROTOCOL_MAX_VERSION).unwrap();
+        let monitor_range = ProtocolRange {
+            min: PROTOCOL_MIN_VERSION,
+            max: PROTOCOL_MAX_VERSION,
+        };
 
         let informant_range: ProtocolRange = serde_json::from_str(&message_text)
             .context("failed to deserialize protocol version range")?;

@@ -36,7 +36,7 @@
 use core::fmt;
 use std::cmp;
 
-use serde::{Deserialize, Serialize};
+use serde::{de::Error, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
 /// A Message we send to the informant.
@@ -160,12 +160,35 @@ impl fmt::Display for ProtocolVersion {
     }
 }
 
-/// A set of protocol bounds that determines what we are speaking. An invariant
-/// that must be maintained is that min <= max. These bounds are inclusive.
-#[derive(Deserialize, Debug)]
+/// A set of protocol bounds that determines what we are speaking.
+///
+/// These bounds are inclusive.
+#[derive(Debug)]
 pub struct ProtocolRange {
-    min: ProtocolVersion,
-    max: ProtocolVersion,
+    pub min: ProtocolVersion,
+    pub max: ProtocolVersion,
+}
+
+// Use a custom deserialize impl to ensure that `self.min <= self.max`
+impl<'de> Deserialize<'de> for ProtocolRange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct InnerProtocolRange {
+            min: ProtocolVersion,
+            max: ProtocolVersion,
+        }
+        let InnerProtocolRange { min, max } = InnerProtocolRange::deserialize(deserializer)?;
+        if min > max {
+            Err(D::Error::custom(format!(
+                "min version = {min} is greater than max version = {max}",
+            )))
+        } else {
+            Ok(ProtocolRange { min, max })
+        }
+    }
 }
 
 impl fmt::Display for ProtocolRange {
@@ -179,16 +202,8 @@ impl fmt::Display for ProtocolRange {
 }
 
 impl ProtocolRange {
-    /// Create a new `ProtocolBounds`. Returns None if min > max
-    pub fn new(min: ProtocolVersion, max: ProtocolVersion) -> Option<Self> {
-        if min > max {
-            None
-        } else {
-            Some(Self { min, max })
-        }
-    }
-
     /// Merge to `ProtocolBounds` to create a range that suitable for both of them.
+    // REVIEW: "create a range" - that's not what this function, does, is it?
     pub fn highest_shared_version(&self, other: &Self) -> anyhow::Result<ProtocolVersion> {
         // We first have to make sure the ranges are overlapping. Once we know
         // this, we can merge the ranges by taking the max of the mins and the
