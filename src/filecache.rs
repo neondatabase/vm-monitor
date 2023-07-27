@@ -1,5 +1,4 @@
-//! This file handles all the logic around configuring and scaling the Postgres
-//! file cache.
+//! Logic for configuring and scaling the Postgres file cache.
 
 use crate::MiB;
 use anyhow::Context;
@@ -16,41 +15,41 @@ pub struct FileCacheState {
 
 #[derive(Debug)]
 pub struct FileCacheConfig {
-    /// InMemory indicates whether the file cache is *actually* stored in memory (e.g. by writing to
+    /// Whether the file cache is *actually* stored in memory (e.g. by writing to
     /// a tmpfs or shmem file). If true, the size of the file cache will be counted against the
     /// memory available for the cgroup.
     pub(crate) in_memory: bool,
 
-    // ResourceMultiplier gives the size of the file cache, in terms of the size of the resource it
-    // consumes (currently: only memory)
-    //
-    // For example, setting ResourceMultiplier = 0.75 gives the cache a target size of 75% of total
-    // resources.
-    //
-    // This value must be strictly between 0 and 1.
+    /// The size of the file cache, in terms of the size of the resource it consumes
+    /// (currently: only memory)
+    ///
+    /// For example, setting `resource_multipler = 0.75` gives the cache a target size of 75% of total
+    /// resources.
+    ///
+    /// This value must be strictly between 0 and 1.
     resource_multiplier: f64,
 
-    // MinRemainingAfterCache gives the required minimum amount of memory, in bytes, that must
-    // remain available after subtracting the file cache.
-    //
-    // This value must be non-zero.
+    /// The required minimum amount of memory, in bytes, that must remain available
+    /// after subtracting the file cache.
+    ///
+    /// This value must be non-zero.
     min_remaining_after_cache: u64,
 
-    // SpreadFactor controls the rate of increase in the file cache's size as it grows from zero
-    // (when total resources equals MinRemainingAfterCache) to the desired size based on
-    // ResourceMultiplier.
-    //
-    // A SpreadFactor of zero means that all additional resources will go to the cache until it
-    // reaches the desired size. Setting SpreadFactor to N roughly means "for every 1 byte added to
-    // the cache's size, N bytes are reserved for the rest of the system, until the cache gets to
-    // its desired size".
-    //
-    // This value must be >= 0, and must retain an increase that is more than what would be given by
-    // ResourceMultiplier. For example, setting ResourceMultiplier = 0.75 but SpreadFactor = 1 would
-    // be invalid, because SpreadFactor would induce only 50% usage - never reaching the 75% as
-    // desired by ResourceMultiplier.
-    //
-    // SpreadFactor is too large if (SpreadFactor+1) * ResourceMultiplier is >= 1.
+    /// Controls the rate of increase in the file cache's size as it grows from zero
+    /// (when total resources equals min_remaining_after_cache) to the desired size based on
+    /// `resource_multiplier`.
+    ///
+    /// A `spread_factor` of zero means that all additional resources will go to the cache until it
+    /// reaches the desired size. Setting `spread_factor` to N roughly means "for every 1 byte added to
+    /// the cache's size, N bytes are reserved for the rest of the system, until the cache gets to
+    /// its desired size".
+    ///
+    /// This value must be >= 0, and must retain an increase that is more than what would be given by
+    /// `resource_multiplier`. For example, setting `resource_multiplier` = 0.75 but `spread_factor` = 1
+    /// would be invalid, because `spread_factor` would induce only 50% usage - never reaching the 75%
+    /// as desired by `resource_multiplier`.
+    ///
+    /// `spread_factor` is too large if `(spread_factor + 1) * resource_multiplier >= 1`.
     spread_factor: f64,
 }
 
@@ -58,9 +57,12 @@ impl Default for FileCacheConfig {
     fn default() -> Self {
         Self {
             in_memory: true,
-            resource_multiplier: 0.75,            // 75 %
-            min_remaining_after_cache: 640 * MiB, // 640 MiB; (512 + 128)
-            spread_factor: 0.1, // ensure any increase in file cache size is split 90-10 with 10% to other memory
+            // 75 %
+            resource_multiplier: 0.75,
+            // 640 MiB; (512 + 128)
+            min_remaining_after_cache: 640 * MiB,
+            // ensure any increase in file cache size is split 90-10 with 10% to other memory
+            spread_factor: 0.1,
         }
     }
 }
@@ -84,42 +86,43 @@ impl FileCacheConfig {
             "min_remaining_after_cache must not be 0"
         );
 
-        // Check that ResourceMultiplier and SpreadFactor are valid w.r.t. each other.
+        // Check that `resource_multiplier` and `spread_factor` are valid w.r.t. each other.
         //
-        // As shown in CalculateCacheSize, we have two lines resulting from ResourceMultiplier and
-        // SpreadFactor, respectively. They are:
+        // As shown in `calculate_cache_size`, we have two lines resulting from `resource_multiplier` and
+        // `spread_factor`, respectively. They are:
         //
-        //                        total                                 MinRemainingAfterCache
-        //   size = —————————————————— - ————————————————————————
-        //                  SpreadFactor + 1                               SpreadFactor + 1
+        //                 `total`             `min_remaining_after_cache`
+        //   size = ---—————————————————— - —————---———————————————————--
+        //           `spread_factor` + 1        `spread_factor` + 1
         //
         // and
         //
-        //   size = ResourceMultiplier × total
+        //   size = `resource_multiplier` × total
         //
-        // .. where 'total' is the total resources. These are isomorphic to the typical 'y = mx + b'
+        // .. where `total` is the total resources. These are isomorphic to the typical 'y = mx + b'
         // form, with y = "size" and x = "total".
         //
         // These lines intersect at:
         //
-        //               MinRemainingAfterCache
+        //               `min_remaining_after_cache`
         //   —————————————————————————————————————————————
-        //    1 - ResourceMultiplier × (SpreadFactor + 1)
+        //    1 - `resource_multiplier` × (`spread_factor` + 1)
         //
-        // We want to ensure that this value (a) exists, and (b) is >= MinRemainingAfterCache. This is
-        // guaranteed when 'ResourceMultiplier × (SpreadFactor + 1)' is less than 1.
+        // We want to ensure that this value (a) exists, and (b) is >= `min_remaining_after_cache`. This is
+        // guaranteed when '`resource_multiplier` × (`spread_factor` + 1)' is less than 1.
         // (We also need it to be >= 0, but that's already guaranteed.)
 
         let intersect_factor = self.resource_multiplier * (self.spread_factor + 1.0);
         anyhow::ensure!(
-            intersect_factor >= 1.0,
-            "incompatible ResourceMultiplier and SpreadFactor"
+            intersect_factor < 1.0,
+            "incompatible resource_multipler and spread_factor"
         );
         Ok(())
     }
 
     /// Calculate the desired size of the cache, given the total memory
     pub fn calculate_cache_size(&self, total: u64) -> u64 {
+        // *Note*: all units are in bytes, until the very last line.
         let available = total.saturating_sub(self.min_remaining_after_cache);
         if available == 0 {
             return 0;
@@ -127,17 +130,15 @@ impl FileCacheConfig {
 
         // Conversions to ensure we don't overflow from floating-point ops
         let size_from_spread =
-            0i64.max((available as f64 / (1.0 + self.spread_factor)) as i64) as u64;
+            0_i64.max((available as f64 / (1.0 + self.spread_factor)) as i64) as u64;
 
         let size_from_normal = (total as f64 * self.resource_multiplier) as u64;
 
         let byte_size = size_from_spread.min(size_from_normal);
 
-        let mib: u64 = MiB;
-
         // The file cache operates in units of mebibytes, so the sizes we produce should
-        // be rounded to a mebibyte. We wound down to be conservative.
-        byte_size / mib * mib
+        // be rounded to a mebibyte. We round down to be conservative.
+        byte_size / MiB * MiB
     }
 }
 
@@ -195,15 +196,11 @@ impl FileCacheState {
             .map(|bytes| bytes as u64)
             .context("failed to extract amx file cache size form query result")?;
 
-        let mut num_mb = num_bytes / MiB;
         let max_mb = max_bytes / MiB;
-
-        if num_bytes > max_bytes {
-            num_mb = max_mb;
-        }
+        let num_mb = (num_bytes / MiB).max(max_mb);
 
         let capped = if num_bytes > max_bytes {
-            " (capped) by maximum size"
+            " (capped by maximum size)"
         } else {
             ""
         };
@@ -211,7 +208,7 @@ impl FileCacheState {
         info!(
             size = num_mb,
             max = max_mb,
-            "updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}",
+            "updating file cache size {capped}",
         );
 
         self.client
