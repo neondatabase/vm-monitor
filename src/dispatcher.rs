@@ -121,6 +121,7 @@ impl Dispatcher {
     /// accidentally serialize something else and send it.
     #[tracing::instrument(skip(self))]
     pub async fn send(&mut self, message: MonitorMessage) -> anyhow::Result<()> {
+        info!(?message, "sending message to agent");
         let json = serde_json::to_string(&message).context("failed to serialize packet")?;
         self.sink
             .send(Message::Text(json))
