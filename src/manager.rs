@@ -8,11 +8,7 @@
 use std::{
     fmt::Display,
     fs, future, mem,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
-    },
-    thread,
+    sync::atomic::{AtomicU64, Ordering},
     time::Duration,
 };
 
@@ -30,7 +26,7 @@ use futures_util::StreamExt;
 use inotify::{Inotify, WatchMask};
 use notify::Event;
 use tokio::time::Instant;
-use tracing::{info, trace, warn};
+use tracing::{info, warn};
 
 /// `Manager` basically represents a cgroup. Its methods cover the behaviour we
 /// want from said cgroup, such as increasing and decreasing memory.{max,high},
@@ -53,20 +49,6 @@ pub struct Manager {
 
     /// The underlying cgroup that we are managing.
     pub(crate) cgroup: Cgroup,
-
-    /// # Safety
-    /// This lock must be held while while performing IO on cgroup "files"
-    /// like memory.high, memory.current, etc
-    ///
-    /// A normal Mutex is appropriate since we never lock the mutex in async
-    /// functions (although an async function may call a sync function that acceses
-    /// the mutex), so it is guaranteed to never be held across await points.
-    ///
-    /// Design note: perhaps we could make a new struct combining
-    ///
-    /// TODO: this should only be an Arc as long as we have the deadlock checker
-    /// (hopefully only  in debug). Otherwise we don't need the sharing.
-    memory_update_lock: Arc<Mutex<()>>,
 }
 
 /// A memory event type reported in memory.events.
@@ -222,22 +204,11 @@ impl Manager {
             )
         };
 
-        let memory_update_lock = Arc::new(Mutex::new(()));
-        let clone = Arc::clone(&memory_update_lock);
-        // Start deadlock checker
-        thread::spawn(move || loop {
-            trace!("waiting 1 second to take memory update lock");
-            std::thread::sleep(Duration::from_millis(1000));
-            let _lock = clone.lock().unwrap();
-            trace!("memory update lock taken and released")
-        });
-
         Ok(Self {
             highs: event_rx,
             errors: error_rx,
             name,
             cgroup,
-            memory_update_lock,
         })
     }
 
@@ -344,9 +315,6 @@ impl Manager {
     pub fn current_memory_usage(&self) -> anyhow::Result<u64> {
         // Get the subsystem first to avoid hold the lock for longer than necessary
         let memory = self.memory().context("failed to get memory subsystem")?;
-
-        let _lock = self.memory_update_lock.lock().unwrap();
-        info!("acquired lock for getting current memory usage",);
         Ok(memory.memory_stat().usage_in_bytes)
     }
 
@@ -355,8 +323,7 @@ impl Manager {
         // Get the subsystem first to avoid hold the lock for longer than necessary
         let memory = self.memory().context("failed to get memory subsystem")?;
 
-        let _lock = self.memory_update_lock.lock().unwrap();
-        info!("acquired lock for setting memory.high",);
+        info!(bytes, "setting memory.high",);
         memory
             .set_mem(cgroups_rs::memory::SetMemory {
                 low: None,
@@ -374,8 +341,6 @@ impl Manager {
             .memory()
             .context("failed to get memory subsystem while setting memory limits")?;
 
-        let _lock = self.memory_update_lock.lock().unwrap();
-        info!("acquired lock for setting memory.{{high, max}}",);
         info!(limits.high, limits.max, "writing new memory limits",);
         memory
             .set_mem(cgroups_rs::memory::SetMemory {
@@ -394,14 +359,10 @@ impl Manager {
         let memory = self
             .memory()
             .context("failed to get memory subsystem while getting memory statistics")?;
-        let high = {
-            let _ = self.memory_update_lock.lock();
-            info!("acquired lock for getting memory.high",);
-            memory
-                .get_mem()
-                .map(|mem| mem.high)
-                .context("failed to get memory statistics from subsystem")?
-        };
+        let high = memory
+            .get_mem()
+            .map(|mem| mem.high)
+            .context("failed to get memory statistics from subsystem")?;
         match high {
             Some(MaxValue::Max) => Ok(i64::MAX as u64),
             Some(MaxValue::Value(high)) => Ok(high as u64),
