@@ -53,8 +53,7 @@ impl Dispatcher {
         info!("waiting for informant to send protocol range");
         let proto_range = if let Some(range) = source.next().await {
             let range = range.context("failed to read range off connection")?;
-            let Message::Text(range) = range
-                else {
+            let Message::Text(range) = range else {
                 // See nhooyr/websocket's implementation of wsjson.Write
                 unreachable!("informant never sends non-text message")
             };
