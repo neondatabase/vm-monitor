@@ -166,7 +166,7 @@ impl Monitor {
             let clone = Arc::clone(&cgroup_state);
             state.cgroup = Some(cgroup_state);
 
-            tokio::spawn(async move { clone.handle_cgroup_signals_loop().await });
+            clone.handle_cgroup_signals_loop();
         } else {
             // *NOTE*: We need to forget the sender so that its drop impl does not get ran.
             // This allows us to poll it in `Monitor::run` regardless of whether we

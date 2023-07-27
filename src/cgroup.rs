@@ -130,7 +130,7 @@ impl CgroupState {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn handle_cgroup_signals_loop(self: &Arc<Self>) {
+    pub fn handle_cgroup_signals_loop(self: &Arc<Self>) {
         // FIXME: we should have "proper" error handling instead of just panicking. It's hard to
         // determine what the correct behavior should be if a cgroup operation fails, though.
         let state = Arc::clone(self);
