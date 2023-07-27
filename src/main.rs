@@ -1,3 +1,5 @@
+// REVIEW: is there a reason why src/main.rs is separate from src/lib.rs?
+// IMO it seems like unnecessary complication.
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -30,24 +32,27 @@ async fn main() -> anyhow::Result<()> {
     tracing::subscriber::set_global_default(subscriber)?;
 
     let app = Router::new()
-        // Current, the informant exposes a /register endpoint. At the time of
-        // writing, we need to support both agent->informant->monitor and
-        // agent->monitor systems due to old vms. For new deploys with just the
-        // monitor, the agent can still hit the /register endpoint. If it gets
-        // a 404 back, it'll know to git the /monitor endpoint and normal
-        // functioning can follow.
-        .route("/register", get(register))
+        // REVIEW [deletion]: Do we actually need the /register endpoint explicitly?
+        // Or can we get away with having nothing, because we should get 404s for
+        // routes that don't exist (?) Not sure - an idea to check.
+        // ---
         // This route gets upgraded to a websocket connection. We only support
         // connection at a time. We enforce this using global app state.
         // True indicates we are connected to someone and False indicates we can
         // receive connections.
         .route("/monitor", get(ws_handler))
+        // REVIEW: Just using a `AtomicBool` means there's no name behind it. It
+        // makes it harder to tell what the purpose is behind it.
+        // But, we already talked about making this a global instead of state.
+        // There's multiple options :)
         .with_state(Arc::new(AtomicBool::new(false)));
 
     let args = Args::parse();
     let addr = args.addr();
     Server::try_bind(&addr.parse().expect("parsing address should not fail"))
         .with_context(|| format!("failed to bind to {addr}"))?
+        // REVIEW: Would be good to separate "bind" from "serve", so that we have a
+        // log line about what address/port we've bound to.
         .serve(app.into_make_service())
         .await
         .context("server exited")?;
@@ -59,6 +64,7 @@ async fn main() -> anyhow::Result<()> {
 /// /monitor endpoint
 #[tracing::instrument(name = "/register")]
 async fn register() -> Response {
+    // REVIEW: Can just return (StatusCode, &'static str) - see more below.
     Response::builder()
         .status(StatusCode::NOT_FOUND)
         .body(Full::from("connect to the monitor via ws on /monitor"))
@@ -75,7 +81,15 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AtomicBool>>) 
         info!("receiving websocket connection");
         ws.on_upgrade(|ws| start_monitor(ws, state))
     } else {
+        // REVIEW: thing I mentioned previously about responding with 409 to a new
+        // informant vs dropping the old one.
         warn!("already connected to an informant over websocket; sending 409");
+        // REVIEW: You can just return a `Result<Response, (http::StatusCode, &'static str)>`
+        // and that should allow you to write
+        //
+        //   Err((StatusCode::Conflict, "monitor may only ..."))
+        //
+        // Instead of manually building the Response object
         Response::builder()
             .status(StatusCode::CONFLICT)
             .body(Full::from(
@@ -92,6 +106,10 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<Arc<AtomicBool>>) 
 /// be logged and our internal state will be reset to allow for new connections.
 #[tracing::instrument(skip(ws))]
 async fn start_monitor(ws: WebSocket, state: Arc<AtomicBool>) {
+    // REVIEW: it'd be good to have a log message here about accepting a websocket
+    // connection.
+    // REVIEW: Why are we re-parsing the arguments every time we accept a weboscket
+    // connection?
     let args = Args::parse();
     let mut monitor = match Monitor::new(Default::default(), args, ws).await {
         Ok(monitor) => monitor,

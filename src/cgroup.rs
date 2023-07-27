@@ -1,3 +1,4 @@
+// REVIEW: "this module" is redundant
 //! This module manages the actual cgroup operations we need to perform to
 //! upscale and downscale. It also handles sending upscale requests to the
 //! dispatcher.
@@ -136,11 +137,18 @@ impl CgroupState {
         let state = Arc::clone(self);
         info!(name = state.manager.name, "starting main signals loop");
         tokio::spawn(async move {
+            // REVIEW: explain what these are for?
             let mut waiting_on_upscale = false;
             let wait_to_increase_memory_high = tokio::time::sleep(Duration::ZERO);
             let wait_to_freeze = tokio::time::sleep(Duration::ZERO);
             tokio::pin!(wait_to_increase_memory_high);
             tokio::pin!(wait_to_freeze);
+            // REVIEW: yikes. this is... not good. This does not translate well from
+            // Go to Rust. It's nigh-impossible to tell what's actually happening
+            // here, with all the varying types of indentation and control flow, and
+            // the minimal comments.
+            //
+            // I would recommend finding a way to restructure this before shipping.
             loop {
                 // Wait for a new signal
                 tokio::select! {
@@ -281,8 +289,12 @@ impl CgroupState {
         });
     }
 
+    // REVIEW: this function can't just return a bool without any comment or anything
+    // explaining what the bool means. Either (a) make a bespoke enum, or (b) add
+    // some comments.
     #[tracing::instrument(skip(self))]
     pub async fn handle_memory_high_event(&self) -> anyhow::Result<bool> {
+        // REVIEW: candidate for now_or_never. You can also just `if let Poll::Ready`.
         tokio::select! {
             biased;
             bundle = self.notify_upscale_events.recv() => {
@@ -307,6 +319,7 @@ impl CgroupState {
             .freeze()
             .with_context(|| format!("failed to freeze cgroup {}", self.manager.name))?;
 
+        // REVIEW: comments explaining this?
         let start = Instant::now();
         let must_thaw = tokio::time::sleep(self.config.max_upscale_wait);
 
@@ -320,11 +333,13 @@ impl CgroupState {
 
         let mut upscaled = false;
         let total_wait;
+        // REVIEW: comment explaining what we're doing?
         tokio::select! {
             bundle = self.notify_upscale_events.recv() => {
                 total_wait = start.elapsed();
+                // REVIEW: duplicated information in the log
                 info!(
-                    wait = total_wait.as_millis(),
+                    wait = total_wait.as_millis(), // REVIEW: log key should have units
                     "received notification that upscale occured after {total_wait:?} ms; thawing cgroup",
                 );
                 match bundle {
@@ -341,8 +356,9 @@ impl CgroupState {
             }
             _ = must_thaw => {
                 total_wait = start.elapsed();
+                // REVIEW: duplicated information in the log
                 info!(
-                    wait = total_wait.as_millis(),
+                    wait = total_wait.as_millis(), // REVIEW: log key should have units
                     "timeout after {total_wait:?} ms waiting for upscale; thawing cgroup",
                 )
             }

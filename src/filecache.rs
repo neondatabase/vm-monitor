@@ -1,5 +1,10 @@
+// REVIEW: "this file" is redundant
 //! This file handles all the logic around configuring and scaling the Postgres
 //! file cache.
+
+// REVIEW: In general, a lot of the comments are out of date, using the original Go
+// names, so they're still UpperCamelCase and not lower_snake_case. Also, they should
+// be made more idiomatic for Rust, and not just say their name at the start ;)
 
 use crate::MiB;
 use anyhow::Context;
@@ -10,6 +15,9 @@ use tracing::{error, info};
 /// Manages Postgres' file cache by keeping a connection open.
 #[derive(Debug)]
 pub struct FileCacheState {
+    // REVIEW: what happens if the connection breaks? do we need to recreate the client? will it
+    // auto-recreate? Something to think about -- keeping the connection forever isn't necessarily
+    // more reliable than connecting as needed (especially because it's within the same VM 😊)
     client: Client,
     pub(crate) config: FileCacheConfig,
 }
@@ -119,6 +127,7 @@ impl FileCacheConfig {
     }
 
     /// Calculate the desired size of the cache, given the total memory
+    // REVIEW: These variables should have units in them!
     pub fn calculate_cache_size(&self, total: u64) -> u64 {
         let available = total.saturating_sub(self.min_remaining_after_cache);
         if available == 0 {
@@ -127,16 +136,17 @@ impl FileCacheConfig {
 
         // Conversions to ensure we don't overflow from floating-point ops
         let size_from_spread =
-            0i64.max((available as f64 / (1.0 + self.spread_factor)) as i64) as u64;
+            0_i64.max((available as f64 / (1.0 + self.spread_factor)) as i64) as u64;
 
         let size_from_normal = (total as f64 * self.resource_multiplier) as u64;
 
         let byte_size = size_from_spread.min(size_from_normal);
 
+        // REVIEW: ??
         let mib: u64 = MiB;
 
         // The file cache operates in units of mebibytes, so the sizes we produce should
-        // be rounded to a mebibyte. We wound down to be conservative.
+        // be rounded to a mebibyte. We round down to be conservative.
         byte_size / mib * mib
     }
 }
@@ -167,6 +177,8 @@ impl FileCacheState {
     pub async fn get_file_cache_size(&self) -> anyhow::Result<u64> {
         self.client
             .query_one(
+                // REVIEW: We should have a comment here about what's going on here; it's not
+                // trivial. (this comment already exists in pkg/informant/filecache.go)
                 "SELECT pg_size_bytes(current_setting('neon.file_cache_size_limit'));",
                 &[],
             )
@@ -197,7 +209,8 @@ impl FileCacheState {
 
         let mut num_mb = num_bytes / MiB;
         let max_mb = max_bytes / MiB;
-
+        // REVIEW: this can just be `let num_mb = (num_bytes / MiB).min(max_mb);`
+        // no need to replicate the Go-ism. :D
         if num_bytes > max_bytes {
             num_mb = max_mb;
         }
@@ -208,12 +221,15 @@ impl FileCacheState {
             ""
         };
 
+        // REVIEW: The information about cache size (size vs max) is already available in the keys
+        // in `info!`; why duplicate it in the message?
         info!(
             size = num_mb,
             max = max_mb,
             "updating file cache size to {num_mb}MiB{capped}, max size = {max_mb}",
         );
 
+        // REVIEW: same thing here - need to have comments explaining what's going on.
         self.client
             .execute(
                 &format!("ALTER SYSTEM SET neon.file_cache_size_limit = {};", num_mb),

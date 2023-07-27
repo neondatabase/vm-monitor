@@ -1,3 +1,4 @@
+// REVIEW: the leading '#' is unnecessary
 //! # bridge
 //!
 //! The dispatcher manages many of the signals in the monitor. It types that
@@ -18,6 +19,7 @@ use tokio::sync::oneshot;
 use tracing::info;
 
 use crate::{
+    // REVIEW: merge these two `protocol::` blocks?
     protocol::{Allocation, MonitorMessage},
     protocol::{
         ProtocolRange, ProtocolResponse, ProtocolVersion, PROTOCOL_MAX_VERSION,
@@ -25,6 +27,9 @@ use crate::{
     },
 };
 
+// REVIEW: This is an important type here! There should be some
+// comments/documentation explainin what the fields are and how they're used.
+// I'll probably be more able to review it once that's the case.
 #[derive(Debug)]
 pub struct Dispatcher {
     pub(crate) source: SplitStream<WebSocket>,
@@ -36,6 +41,7 @@ pub struct Dispatcher {
 }
 
 impl Dispatcher {
+    // REVIEW: split out 1-sentence description into a separate paragraph (as discussed)
     /// Creates a new dispatcher using the passed-in connection. Performs a
     /// negotiation with the informant to determine a suitable protocol range.
     /// This consists of two steps:
@@ -50,7 +56,14 @@ impl Dispatcher {
         let (mut sink, mut source) = stream.split();
 
         // Figure out what protocol to use
+        // REVIEW: "what protocol to use" seems... misleading. It's the same
+        // protocol, right? just different versions. Something to consider for a
+        // handful of other places as well. e.g. it's not the *protocol* range, it's
+        // the protocol *version* range. (log messages are most important here!)
         info!("waiting for informant to send protocol range");
+        // REVIEW: the syntax here - you've got this big indented block that ends
+        // waaaay down below with "oops error". I'd recommend making this a
+        // `let ... else` and avoid indenting everything.
         let proto_range = if let Some(range) = source.next().await {
             let range = range.context("failed to read range off connection")?;
             let Message::Text(range) = range else {
@@ -58,6 +71,13 @@ impl Dispatcher {
                 unreachable!("informant never sends non-text message")
             };
 
+            // REVIEW: this assertion is mostly noise here IMO - why would this be
+            // true? If you're concerned about it, you can use an `assert!` in the
+            // original module like so:
+            //
+            //   const _: () = {
+            //      assert!(PROTOCOL_MIN_VERSION <= PROTOCOL_MAX_VERSION);
+            //   };
             assert!(PROTOCOL_MIN_VERSION <= PROTOCOL_MAX_VERSION);
             // Safe to unwrap because of the assert
             let monitor_range: ProtocolRange =
@@ -116,6 +136,10 @@ impl Dispatcher {
             .context("failed to get receipt of upscale from cgroup")
     }
 
+    // REVIEW: "mainly here so we only send actual data" - this does not tell me much
+    // about what the method *actually* is. I'd put a description of *what* this
+    // method does first, and then provide the context that explains *why* it's here
+    // after.
     /// Mainly here so we only send actual data. Otherwise, it would be easy to
     /// accidentally serialize something else and send it.
     #[tracing::instrument(skip(self))]
