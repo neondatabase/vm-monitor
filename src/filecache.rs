@@ -1,8 +1,10 @@
 //! Logic for configuring and scaling the Postgres file cache.
 
+use std::num::NonZeroU64;
+
 use crate::MiB;
 use anyhow::{anyhow, Context};
-use tokio_postgres::{Client, NoTls, Row, types::ToSql};
+use tokio_postgres::{types::ToSql, Client, NoTls, Row};
 use tracing::{error, info};
 
 /// Manages Postgres' file cache by keeping a connection open.
@@ -33,7 +35,7 @@ pub struct FileCacheConfig {
     /// after subtracting the file cache.
     ///
     /// This value must be non-zero.
-    min_remaining_after_cache: u64,
+    min_remaining_after_cache: NonZeroU64,
 
     /// Controls the rate of increase in the file cache's size as it grows from zero
     /// (when total resources equals min_remaining_after_cache) to the desired size based on
@@ -60,7 +62,7 @@ impl Default for FileCacheConfig {
             // 75 %
             resource_multiplier: 0.75,
             // 640 MiB; (512 + 128)
-            min_remaining_after_cache: 640 * MiB,
+            min_remaining_after_cache: NonZeroU64::new(640 * MiB).unwrap(),
             // ensure any increase in file cache size is split 90-10 with 10% to other memory
             spread_factor: 0.1,
         }
@@ -80,10 +82,6 @@ impl FileCacheConfig {
             self.spread_factor >= 0.0,
             "spread_factor must be >= 0, got {}",
             self.spread_factor
-        );
-        anyhow::ensure!(
-            self.min_remaining_after_cache != 0,
-            "min_remaining_after_cache must not be 0"
         );
 
         // Check that `resource_multiplier` and `spread_factor` are valid w.r.t. each other.
@@ -123,7 +121,7 @@ impl FileCacheConfig {
     /// Calculate the desired size of the cache, given the total memory
     pub fn calculate_cache_size(&self, total: u64) -> u64 {
         // *Note*: all units are in bytes, until the very last line.
-        let available = total.saturating_sub(self.min_remaining_after_cache);
+        let available = total.saturating_sub(self.min_remaining_after_cache.get());
         if available == 0 {
             return 0;
         }
