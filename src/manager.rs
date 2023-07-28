@@ -1,7 +1,7 @@
-//! # `manager`
+//! Exposes the `Manager` type that represents a managed cgroup.
 //!
-//! `manager` exposes a `Manager` type that represents a managed cgroup with all
-//! the functionality we need.
+//! Supports common operations such as getting/setting memory limits and
+//! controlling freezer subsystem.
 
 // Need to think about who is releasing/initing the cgroup
 // TODO: is it ok to just unwrap channel errors? How could we handle them?
