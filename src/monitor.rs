@@ -9,7 +9,7 @@ use std::{fmt::Debug, mem};
 use anyhow::{bail, Context};
 use async_std::channel;
 use axum::extract::ws::{Message, WebSocket};
-use futures_util::{StreamExt, TryFutureExt};
+use futures_util::StreamExt;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
@@ -35,7 +35,7 @@ pub struct Monitor {
     cgroup: Option<Arc<CgroupState>>,
     dispatcher: Dispatcher,
 
-    /// We "mint" new package ids by incrementing this counter and taking the value.
+    /// We "mint" new message ids by incrementing this counter and taking the value.
     counter: usize,
 
     /// A signal to kill the main thread produced by `self.run()`. This is triggered
@@ -74,7 +74,7 @@ impl Monitor {
     #[tracing::instrument(skip(ws))]
     pub async fn new(
         config: MonitorConfig,
-        args: Args,
+        args: &Args,
         ws: WebSocket,
         kill: broadcast::Receiver<()>,
     ) -> anyhow::Result<Self> {
@@ -108,14 +108,14 @@ impl Monitor {
         // We need to process file cache initialization before cgroup initialization, so that the memory
         // allocated to the file cache is appropriately taken into account when we decide the cgroup's
         // memory limits.
-        if let Some(connstr) = args.file_cache_conn_str {
+        if let Some(connstr) = &args.file_cache_conn_str {
             info!("initializing file cache");
             let config: FileCacheConfig = Default::default();
             if !config.in_memory {
                 panic!("file cache not in-memory implemented")
             }
 
-            let file_cache = FileCacheState::new(&connstr, config)
+            let mut file_cache = FileCacheState::new(&connstr, config)
                 .await
                 .context("failed to create file cache")?;
 
@@ -145,9 +145,9 @@ impl Monitor {
             state.filecache = Some(file_cache);
         }
 
-        if let Some(name) = args.cgroup {
+        if let Some(name) = &args.cgroup {
             info!("creating manager");
-            let manager = Manager::new(name)
+            let manager = Manager::new(name.clone())
                 .await
                 .context("failed to create new manager")?;
             let config = Default::default();
@@ -182,7 +182,7 @@ impl Monitor {
 
     /// Attempt to downscale filecache + cgroup
     #[tracing::instrument(skip(self))]
-    pub async fn try_downscale(&self, target: Allocation) -> anyhow::Result<(bool, String)> {
+    pub async fn try_downscale(&mut self, target: Allocation) -> anyhow::Result<(bool, String)> {
         // Nothing to adjust
         if self.cgroup.is_none() && self.filecache.is_none() {
             info!("no action needed for downscale (no cgroup or file cache enabled)");
@@ -227,7 +227,7 @@ impl Monitor {
         // The downscaling has been approved. Downscale the file cache, then the cgroup.
         let mut status = vec![];
         let mut file_cache_mem_usage = 0;
-        if let Some(file_cache) = &self.filecache {
+        if let Some(file_cache) = &mut self.filecache {
             if !file_cache.config.in_memory {
                 panic!("file cache not in-memory unimplemented")
             }
@@ -276,7 +276,7 @@ impl Monitor {
 
     /// Handle new resources
     #[tracing::instrument(skip(self))]
-    pub async fn handle_upscale(&self, resources: Allocation) -> anyhow::Result<()> {
+    pub async fn handle_upscale(&mut self, resources: Allocation) -> anyhow::Result<()> {
         if self.filecache.is_none() && self.cgroup.is_none() {
             info!("no action needed for upscale (no cgroup or file cache enabled)");
             return Ok(());
@@ -287,7 +287,7 @@ impl Monitor {
 
         // Get the file cache's expected contribution to the memory usage
         let mut file_cache_mem_usage = 0;
-        if let Some(file_cache) = &self.filecache {
+        if let Some(file_cache) = &mut self.filecache {
             if !file_cache.config.in_memory {
                 panic!("file cache not in-memory unimplemented");
             }
@@ -338,26 +338,21 @@ impl Monitor {
     #[tracing::instrument(skip(self))]
     pub async fn process_packet(
         &mut self,
-        message: InformantMessage,
+        InformantMessage { inner, id }: InformantMessage,
     ) -> anyhow::Result<Option<MonitorMessage>> {
-        info!(?message, "received message from informant");
-        let InformantMessage { inner, id } = message;
         match inner {
             InformantMessageInner::UpscaleNotification { granted } => {
-                // See the TryFutureExt
-                // trait wonderfully located
-                // in the futures crate
                 self.handle_upscale(granted)
-                    .map_err(|e| e.context("failed to handle upscale"))
-                    .and_then(|_| self.dispatcher.notify_upscale(granted))
-                    .map_err(|e| e.context("failed to notify cgroup of upscale event"))
                     .await
-                    .map(|_| {
-                        Some(MonitorMessage::new(
-                            MonitorMessageInner::UpscaleConfirmation {},
-                            id,
-                        ))
-                    })
+                    .context("failed to handle upscale")?;
+                self.dispatcher
+                    .notify_upscale(granted)
+                    .await
+                    .context("failed to notify notify cgroup of upscale")?;
+                Ok(Some(MonitorMessage::new(
+                    MonitorMessageInner::UpscaleConfirmation {},
+                    id,
+                )))
             }
             InformantMessageInner::DownscaleRequest { target } => self
                 .try_downscale(target)
