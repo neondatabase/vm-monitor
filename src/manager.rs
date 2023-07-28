@@ -19,7 +19,7 @@ use anyhow::{anyhow, Context};
 use async_std::channel::{self, Receiver, TryRecvError};
 use cgroups_rs::{
     cgroup::{Cgroup, UNIFIED_MOUNTPOINT},
-    freezer::{FreezerController, FreezerState},
+    freezer::FreezerController,
     hierarchies::{self, is_cgroup2_unified_mode},
     memory::MemController,
     MaxValue,
@@ -141,15 +141,14 @@ impl Manager {
         let (event_tx, event_rx) = channel::bounded(1);
         let (error_tx, error_rx) = channel::bounded(1);
 
-        // The duration to separate restarts of the listener by: 1000ms = 1s
-        let min_wait = Duration::from_millis(1000);
-
-        let timer = tokio::time::sleep(min_wait);
-        let high_count = AtomicU64::new(0);
         let name_clone = name.clone();
 
         // Long running background task for getting memory.events updates
         tokio::spawn(async move {
+            // The duration to separate restarts of the listener by: 1000ms = 1s
+            let high_count = AtomicU64::new(0);
+            let min_wait = Duration::from_millis(1000);
+            let timer = tokio::time::sleep(min_wait);
             tokio::pin!(timer);
             // TODO: how big do we want buffer to be?
             let mut events = inotify
