@@ -6,6 +6,7 @@ use std::{future, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use async_std::channel::{Receiver, Sender};
+use futures_util::FutureExt;
 use tokio::{sync::oneshot, time::Instant};
 use tracing::info;
 
@@ -283,24 +284,20 @@ impl CgroupState {
 
     #[tracing::instrument(skip(self))]
     pub async fn handle_memory_high_event(&self) -> anyhow::Result<bool> {
-        tokio::select! {
-            biased;
-            bundle = self.notify_upscale_events.recv() => {
-                info!("skipping memory.high event because there was an upscale event");
-                match bundle {
-                    Ok((_, tx)) => {
-                        // Report back that we're done handling the event.
-                        // This is *important* as the dispatcher is waiting on hearing back!
-                        if tx.send(()).is_err() {
-                            panic!("error confirming receipt of upscale");
-                        }
+        if let Some(bundle) = self.notify_upscale_events.recv().now_or_never() {
+            info!("skipping memory.high event because there was an upscale event");
+            match bundle {
+                Ok((_, tx)) => {
+                    // Report back that we're done handling the event.
+                    // This is *important* as the dispatcher is waiting on hearing back!
+                    if tx.send(()).is_err() {
+                        panic!("error confirming receipt of upscale");
                     }
-                    Err(e) => panic!("error listening for upscales, {e}")
                 }
-                return Ok(false);
-            },
-            _ = future::ready(()) => {}
-        };
+                Err(e) => panic!("error listening for upscales, {e}"),
+            }
+            return Ok(false);
+        }
 
         info!("received memory.high event; freezing cgroup");
         self.manager
