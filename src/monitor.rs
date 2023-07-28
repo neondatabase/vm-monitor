@@ -13,18 +13,14 @@ use futures_util::StreamExt;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
-use crate::{
-    cgroup::CgroupState,
-    dispatcher::Dispatcher,
-    filecache::{FileCacheConfig, FileCacheState},
-    get_total_system_memory,
-    manager::{Manager, MemoryLimits},
-    mib,
-    protocol::{
-        Allocation, InformantMessage, InformantMessageInner, MonitorMessage, MonitorMessageInner,
-    },
-    Args, MiB,
+use crate::cgroup::CgroupState;
+use crate::dispatcher::Dispatcher;
+use crate::filecache::{FileCacheConfig, FileCacheState};
+use crate::manager::{Manager, MemoryLimits};
+use crate::protocol::{
+    Allocation, InformantMessage, InformantMessageInner, MonitorMessage, MonitorMessageInner,
 };
+use crate::{get_total_system_memory, mib, Args, MiB};
 
 /// Central struct that interacts with informant, dispatcher, and cgroup to handle
 /// signals from the informant.
