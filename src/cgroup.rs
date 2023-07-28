@@ -321,8 +321,8 @@ impl CgroupState {
             bundle = self.notify_upscale_events.recv() => {
                 total_wait = start.elapsed();
                 info!(
-                    wait = total_wait.as_millis(),
-                    "received notification that upscale occured after {total_wait:?} ms; thawing cgroup",
+                    wait_ms = total_wait.as_millis(),
+                    "received upscale notification -> thawing cgroup",
                 );
                 match bundle {
                     Ok((_, tx)) => {
@@ -339,8 +339,8 @@ impl CgroupState {
             _ = must_thaw => {
                 total_wait = start.elapsed();
                 info!(
-                    wait = total_wait.as_millis(),
-                    "timeout after {total_wait:?} ms waiting for upscale; thawing cgroup",
+                    timeout_ms = total_wait.as_millis(),
+                    "timed out waiting for upscale -> thawing cgroup",
                 )
             }
         };
