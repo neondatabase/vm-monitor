@@ -1,6 +1,6 @@
-//! This module manages the actual cgroup operations we need to perform to
-//! upscale and downscale. It also handles sending upscale requests to the
-//! dispatcher.
+//! Handling upscales and downscales via cgroup operations.
+//! 
+//! Also handles requesting upscale and processing cgroup memory.high events.
 
 use std::{future, sync::Arc, time::Duration};
 
