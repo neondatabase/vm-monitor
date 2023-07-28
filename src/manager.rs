@@ -10,9 +10,8 @@ use std::{
     fs, future, mem,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Mutex,
     },
-    thread,
     time::Duration,
 };
 
@@ -30,7 +29,7 @@ use futures_util::StreamExt;
 use inotify::{Inotify, WatchMask};
 use notify::Event;
 use tokio::time::Instant;
-use tracing::{info, trace, warn};
+use tracing::{info, warn};
 
 /// `Manager` basically represents a cgroup. Its methods cover the behaviour we
 /// want from said cgroup, such as increasing and decreasing memory.{max,high},
@@ -62,11 +61,7 @@ pub struct Manager {
     /// functions (although an async function may call a sync function that acceses
     /// the mutex), so it is guaranteed to never be held across await points.
     ///
-    /// Design note: perhaps we could make a new struct combining
-    ///
-    /// TODO: this should only be an Arc as long as we have the deadlock checker
-    /// (hopefully only  in debug). Otherwise we don't need the sharing.
-    memory_update_lock: Arc<Mutex<()>>,
+    memory_update_lock: Mutex<()>,
 }
 
 /// A memory event type reported in memory.events.
@@ -229,21 +224,16 @@ impl Manager {
         // on startup since some processes might already be running.
         // We don't want to block here as that would interrupt the rest of
         // startup, so we use try_recv to flush a possible event.
+        // REVIEW: tbh, an error will be detected later anyways. I'd just write:
+        //
+        //   _ = event_rx.try_recv();
         if let Err(TryRecvError::Closed) = event_rx.try_recv() {
             anyhow::bail!(
                 "failed to clear initial memory.high event count due to event channel being closed"
             )
         };
 
-        let memory_update_lock = Arc::new(Mutex::new(()));
-        let clone = Arc::clone(&memory_update_lock);
-        // Start deadlock checker
-        thread::spawn(move || loop {
-            trace!("waiting 1 second to take memory update lock");
-            std::thread::sleep(Duration::from_millis(1000));
-            let _lock = clone.lock().unwrap();
-            trace!("memory update lock taken and released")
-        });
+        let memory_update_lock = Mutex::new(());
 
         Ok(Self {
             highs: event_rx,
