@@ -53,6 +53,10 @@ pub struct Manager {
     /// The underlying cgroup that we are managing.
     pub(crate) cgroup: Cgroup,
 
+    // REVIEW: "Safety"? we're ok from a safety perspective with multiple concurrent
+    // writers to cgroup files (the kernel will make sure of that) - we just might
+    // end up a little confused with inconsistent state. It's more for us than it is
+    // for anyone else.
     /// # Safety
     /// This lock must be held while while performing IO on cgroup "files"
     /// like memory.high, memory.current, etc
@@ -60,6 +64,10 @@ pub struct Manager {
     /// A normal Mutex is appropriate since we never lock the mutex in async
     /// functions (although an async function may call a sync function that acceses
     /// the mutex), so it is guaranteed to never be held across await points.
+    // REVIEW: "although an async fucntion may [acquire the mutex]" - that's not
+    // good! I'd ditch the lock altogether because that'll do more harm than good,
+    // especially for a nebulously-defined lock like this one. Better to guarantee
+    // only one writer at a time by doing all cgroup operations in a single thread.
     ///
     memory_update_lock: Mutex<()>,
 }
@@ -129,6 +137,10 @@ impl Manager {
         let cgroup = Cgroup::load(hierarchies::auto(), &name);
 
         // Set up a watcher that notifies on changes to memory.events
+        // REVIEW: add more comments! It's hard to tell what's going on here if
+        // you're not already familiar with cgroup v2 and how watching memory.events
+        // works. Maybe even link to some manpages.
+        // REVIEW: Also this should be a separate function.
         info!("creating file watcher for memory.high events");
         let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
         let inotify = Inotify::init().context("failed to initialize file watcher")?;
@@ -151,6 +163,14 @@ impl Manager {
             let timer = tokio::time::sleep(min_wait);
             tokio::pin!(timer);
             // TODO: how big do we want buffer to be?
+            // ---
+            // REVIEW: "how big"? From reading `man 7 inotify` their example is 4096
+            // bytes. the `inotify` crate uses 1024. It just needs to fit a single
+            // inotify event (i.e. the kernel struct), AFAICT, which really isnt'
+            // that long, but hey, 4KiB is practically nothing.
+            // ---
+            // REVIEW: I'd recommend moving this processing of inotify elsewhere and
+            // exposing it abstractly.
             let mut events = inotify
                 .into_event_stream(
                     [0u8; 10 * mem::size_of::<anyhow::Result<Event, anyhow::Error>>()],
@@ -161,6 +181,7 @@ impl Manager {
                 // Make sure restarts of the listener are separated by min_wait
                 // The first branch will always be taken immediately on the first
                 // iteration because of how waiter is initialized.
+                // REVIEW: consider https://docs.rs/futures/latest/futures/future/trait.FutureExt.html#method.now_or_never
                 tokio::select! {
                     biased;
                     // If the time has elapsed, continue
@@ -205,6 +226,9 @@ impl Manager {
             }
         });
 
+        // REVIEW: This comment has a lot of words. Racing is... not that bad. And
+        // should be impossible, I think? There's no need for the lock because there
+        // shouldn't be anyone else accessing anything right now.
         // Log out an initial memory.high event count
         //
         // Note: in theory, this is a little risky because in we guard
@@ -212,6 +236,9 @@ impl Manager {
         // "file" should be very fast, there should be very little contention,
         // and the only other thing that could access the file is the the thread
         // we just spawned. Therefore, the likelihood of a race is very small.
+        // REVIEW: Explain why the `get_event_count` is here (hint: because we only
+        // get "file updated", not the actual event that happened, so we need to know
+        // the initial counts)
         let high = Self::get_event_count(&name, MemoryEvent::High)
             .context("failed to extract number of memory.high events from memory.events")?;
         info!(

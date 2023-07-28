@@ -55,6 +55,15 @@ impl MonitorMessage {
 /// The different underlying message types we can send to the informant.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
+// REVIEW: `MonitorMessageInner` is quite long. I would recommend renaming
+// `MonitorMessage`/`MonitorMessageInner` to one of:
+//
+//  * `MonitorMessage` / `MonitorMessageKind`
+//  * `OutboundMessage` / `OutboundMessageKind`
+//
+// (the reason to use "outbound" instead of "monitor" is because it makes the
+// direction of the flow clear.)
+// You might also like to use 'Msg' instead of 'Message', as an abbreviation :)
 pub enum MonitorMessageInner {
     /// Indicates that the informant sent an invalid message, i.e, we couldn't
     /// properly deserialize it.
@@ -75,6 +84,12 @@ pub enum MonitorMessageInner {
     /// However, if we are simply unsuccessful (for example, do to needing the resources),
     /// that gets included in the `DownscaleResult`.
     DownscaleResult {
+        // REVIEW: I don't think it's as simple as you've highlighted here because
+        // the monitor will still be *sending* this type. It's worth having the
+        // context here though. I'd specifically name the type used on the
+        // agent/informant side. If there's a relevant issue, feel free to link it -
+        // that's more likely to stay up to date with future plans.
+        // ---
         // FIXME for the future (once the informant is deprecated)
         // As of the time of writing, the informant also uses a struct on the go
         // side called DownscaleResult. This struct has uppercase fields which are
@@ -103,6 +118,9 @@ pub struct InformantMessage {
 /// The different underlying message types we can receive from the informant.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type", content = "content")]
+// REVIEW: Same thing here about the length of the type name - do you really want to
+// type that everywhere?
+// This is another case where e.g. `InboundMessageKind` might be nice :)
 pub enum InformantMessageInner {
     /// Indicates that the we sent an invalid message, i.e, we couldn't
     /// properly deserialize it.
@@ -126,6 +144,7 @@ pub enum InformantMessageInner {
 
 /// Represents the resources granted to a VM.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+// REVIEW: it's ok to have >1 word! this type is resources! include it in the name!
 pub struct Allocation {
     /// Number of vCPUs
     pub(crate) cpu: f64,
@@ -142,6 +161,9 @@ impl Allocation {
 pub const PROTOCOL_MIN_VERSION: ProtocolVersion = ProtocolVersion::V1_0;
 pub const PROTOCOL_MAX_VERSION: ProtocolVersion = ProtocolVersion::V1_0;
 
+// REVIEW: AFAICT this will prevent adding new protocol versions because they'd need
+// to be recognized here, right? Consider defining ProtocolVersion as a newtype'd
+// `u8` with constants for V1_0, etc. The `match` in the Display impl will still work :)
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 pub enum ProtocolVersion {
@@ -228,6 +250,17 @@ impl ProtocolRange {
 /// An enum in disguise for returning the settled on protocol with the informant.
 /// If error is None, version should be Some and vice versa. It's set up this way
 /// to ease usage on the go side.
+// REVIEW: Does it have to be defined like this? Could the following work?
+//
+//   #[derive(Serialize)]
+//   #[serde(rename_all = "camelCase")]
+//   pub enum ProtocolResponse {
+//       Error(String),
+//       Version(ProtocolVersion),
+//   }
+//
+// see also: https://serde.rs/enum-representations.html
+// NB: "externally tagged" is the default.
 #[derive(Serialize, Debug)]
 pub struct ProtocolResponse {
     error: Option<String>,

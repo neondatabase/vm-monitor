@@ -22,6 +22,8 @@ use crate::protocol::{
 };
 use crate::{get_total_system_memory, mib, Args, MiB};
 
+// REVIEW: This whole repo is called `vm-monitor`. Why is this something separate, in
+// a submodule? Is there a better name we could use?
 /// Central struct that interacts with informant, dispatcher, and cgroup to handle
 /// signals from the informant.
 #[derive(Debug)]

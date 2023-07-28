@@ -137,11 +137,18 @@ impl CgroupState {
         let state = Arc::clone(self);
         info!(name = state.manager.name, "starting main signals loop");
         tokio::spawn(async move {
+            // REVIEW: explain what these are for?
             let mut waiting_on_upscale = false;
             let wait_to_increase_memory_high = tokio::time::sleep(Duration::ZERO);
             let wait_to_freeze = tokio::time::sleep(Duration::ZERO);
             tokio::pin!(wait_to_increase_memory_high);
             tokio::pin!(wait_to_freeze);
+            // REVIEW: yikes. this is... not good. This does not translate well from
+            // Go to Rust. It's nigh-impossible to tell what's actually happening
+            // here, with all the varying types of indentation and control flow, and
+            // the minimal comments.
+            //
+            // I would recommend finding a way to restructure this before shipping.
             loop {
                 // Wait for a new signal
                 tokio::select! {
@@ -282,6 +289,14 @@ impl CgroupState {
         });
     }
 
+    // REVIEW: this function can't just return a bool without any comment or anything
+    // explaining what the bool means. Either (a) make a bespoke enum, or (b) add
+    // some comments.
+    //
+    /// Handle a memory high event by requesting upscaling and freezing/thawing
+    /// the cgroup as necessary.
+    ///
+    /// Returns whether we upscaled successfully or not
     #[tracing::instrument(skip(self))]
     pub async fn handle_memory_high_event(&self) -> anyhow::Result<bool> {
         if let Some(bundle) = self.notify_upscale_events.recv().now_or_never() {
@@ -304,6 +319,7 @@ impl CgroupState {
             .freeze()
             .with_context(|| format!("failed to freeze cgroup {}", self.manager.name))?;
 
+        // REVIEW: comments explaining this?
         let start = Instant::now();
         let must_thaw = tokio::time::sleep(self.config.max_upscale_wait);
 
@@ -317,6 +333,7 @@ impl CgroupState {
 
         let mut upscaled = false;
         let total_wait;
+        // REVIEW: comment explaining what we're doing?
         tokio::select! {
             bundle = self.notify_upscale_events.recv() => {
                 total_wait = start.elapsed();
