@@ -294,14 +294,6 @@ impl Manager {
             })
     }
 
-    /// Retrieve whether cgroup is frozen or thawed.
-    pub fn state(&self) -> anyhow::Result<FreezerState> {
-        self.freezer()
-            .context("failed to get freezer subsystem while attempting to get freezer state")?
-            .state()
-            .context("failed to get freezer state")
-    }
-
     /// Get a handle on the freezer subsystem.
     fn freezer(&self) -> anyhow::Result<&FreezerController> {
         if let Some(Freezer(freezer)) = self
