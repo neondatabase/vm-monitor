@@ -33,7 +33,8 @@ pub struct Runner {
     counter: usize,
 
     /// A signal to kill the main thread produced by `self.run()`. This is triggered
-    /// when the server receives a new connection.
+    /// when the server receives a new connection. When the thread receives the
+    /// signal off this channel, it will gracefully shutdown.
     kill: broadcast::Receiver<()>,
 }
 
