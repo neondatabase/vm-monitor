@@ -424,24 +424,30 @@ impl CgroupWatcher {
         })
     }
 
-    // TODO: rename this
     /// The entrypoint for the `CgroupWatcher`.
     #[tracing::instrument(skip(self))]
-    pub async fn main_signals_loop(&self) -> anyhow::Result<()> {
+    pub async fn watch(&self) -> anyhow::Result<()> {
         // There are several actions might do when receiving a `memory.high`,
         // such as freezing the cgroup, or increasing its `memory.high`. We don't
         // want to do these things too often (because postgres needs to run, and
         // we only have so much memory). These timers serve as rate limits for this.
         let wait_to_freeze = tokio::time::sleep(Duration::ZERO);
-        tokio::pin!(wait_to_freeze);
         let wait_to_increase_memory_high = tokio::time::sleep(Duration::ZERO);
-        tokio::pin!(wait_to_increase_memory_high);
+
+        tokio::pin!(wait_to_freeze, wait_to_increase_memory_high);
 
         // Are we waiting to be upscaled? Could be true if we request upscale due
         // to a memory.high event and it does not arrive in time.
         let mut waiting_on_upscale = false;
 
-        while let Some(Sequenced { seqnum, data }) = self.events.lock().await.next().await {
+        while let Some(Sequenced { seqnum, data }) = {
+            // Get the next element in a block to avoid holding the lock for the
+            // entire loop body - this will cause deadlocks
+            let mut stream = self.events.lock().await;
+            let next = stream.next().await;
+            drop(stream);
+            next
+        } {
             match data {
                 EventKind::Upscale(_) => self.last_upscale_seqnum.store(seqnum, Ordering::Release),
                 EventKind::MemoryHigh(_) => {
