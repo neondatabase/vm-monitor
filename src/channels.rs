@@ -97,12 +97,12 @@ enum EventKind {
 /// An extension to a stream that makes it peekable.
 ///
 /// Note: this should probably be replaced using futures::StreamExt::Peekable
-struct PeekableStream<'a, T> {
-    stream: BoxStream<'a, T>,
+struct PeekableStream<T> {
+    stream: BoxStream<'static, T>,
     peek: Option<T>,
 }
 
-impl<'a, T> Debug for PeekableStream<'a, T>
+impl<T> Debug for PeekableStream<T>
 where
     T: Debug,
 {
@@ -114,10 +114,10 @@ where
     }
 }
 
-impl<'a, T> PeekableStream<'a, T> {
+impl<T> PeekableStream<T> {
     pub fn new<S>(stream: S) -> Self
     where
-        S: Stream<Item = T> + Send + 'a,
+        S: Stream<Item = T> + Send + 'static
     {
         Self {
             stream: futures_util::StreamExt::boxed(stream),
@@ -133,7 +133,7 @@ impl<'a, T> PeekableStream<'a, T> {
     }
 }
 
-impl<'a, T> Stream for PeekableStream<'a, T>
+impl<T> Stream for PeekableStream<T>
 where
     T: Unpin,
 {
@@ -250,7 +250,7 @@ impl<T> Sequenced<T> {
 /// `MonitorEvent`s. See `main_signals_loop` for details on how to keep the
 /// cgroup happy.
 #[derive(Debug)]
-pub struct CgroupWatcher<'a> {
+pub struct CgroupWatcher {
     config: Config,
 
     /// The event stream that informs cgroup actions. Consists of upscale requests
@@ -262,7 +262,7 @@ pub struct CgroupWatcher<'a> {
     /// `Cgroup`. However, the monitor still needs to be able to do things like
     /// get/set memory. Therefore we wrap the stream in a Mutex. It's a little
     /// ugly, but the Mutex is never contended so this shouldn't have any ill effects.
-    events: Mutex<PeekableStream<'a, Sequenced<EventKind>>>,
+    events: Mutex<PeekableStream<Sequenced<EventKind>>>,
 
     /// The sequence number of the last upscale.
     ///
@@ -342,7 +342,7 @@ fn create_file_watcher(path: &str) -> anyhow::Result<EventStream<[u8; 1024]>> {
         .context("failed to start inotify event stream")
 }
 
-impl<'a> CgroupWatcher<'a> {
+impl CgroupWatcher {
     #[tracing::instrument]
     pub fn new(
         name: String,
@@ -657,7 +657,7 @@ impl MemoryLimits {
 }
 
 // Methods for manipulating the actual cgroup
-impl CgroupWatcher<'_> {
+impl CgroupWatcher {
     /// Get a handle on the freezer subsystem.
     fn freezer(&self) -> anyhow::Result<&FreezerController> {
         if let Some(Freezer(freezer)) = self

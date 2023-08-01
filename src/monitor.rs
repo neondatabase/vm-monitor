@@ -26,10 +26,10 @@ use crate::{get_total_system_memory, mib, Args, MiB};
 /// Central struct that interacts with informant, dispatcher, and cgroup to handle
 /// signals from the informant.
 #[derive(Debug)]
-pub struct Monitor<'a> {
+pub struct Monitor {
     config: MonitorConfig,
     filecache: Option<FileCacheState>,
-    cgroup: Option<Arc<CgroupWatcher<'a>>>,
+    cgroup: Option<Arc<CgroupWatcher>>,
     dispatcher: Dispatcher,
 
     /// We "mint" new message ids by incrementing this counter and taking the value.
@@ -66,7 +66,7 @@ impl Default for MonitorConfig {
     }
 }
 
-impl Monitor<'_> {
+impl Monitor {
     /// Create a new monitor.
     #[tracing::instrument(skip(ws))]
     pub async fn new(
@@ -74,7 +74,7 @@ impl Monitor<'_> {
         args: &Args,
         ws: WebSocket,
         kill: broadcast::Receiver<()>,
-    ) -> anyhow::Result<Monitor<'_>> {
+    ) -> anyhow::Result<Monitor> {
         anyhow::ensure!(
             config.sys_buffer_bytes != 0,
             "invalid MonitorConfig: ssy_buffer_bytes cannot be 0"
@@ -156,6 +156,8 @@ impl Monitor<'_> {
             let clone = Arc::clone(&cgroup);
 
             tokio::spawn(async move { clone.main_signals_loop().await });
+
+            state.cgroup = Some(cgroup);
         } else {
             // *NOTE*: We need to forget the sender so that its drop impl does not get ran.
             // This allows us to poll it in `Monitor::run` regardless of whether we
