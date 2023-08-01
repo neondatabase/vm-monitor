@@ -296,11 +296,12 @@ pub struct CgroupWatcher<'a> {
 
 /// Read memory.events for the desired event type.
 ///
+/// `path` specifies the path to the desired `memory.events` file.
 /// For more info, see the `memory.events` section of the [kernel docs]
 /// (https://docs.kernel.org/admin-guide/cgroup-v2.html#memory-interface-files)
-fn get_event_count(name: &str, event: MemoryEvent) -> anyhow::Result<u64> {
-    let path = format!("{}/{}/memory.events", UNIFIED_MOUNTPOINT, &name);
-    let contents = fs::read_to_string(&path).expect("failed to read memory events info");
+fn get_event_count(path: &str, event: MemoryEvent) -> anyhow::Result<u64> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("failed to read memory.events from {path}"))?;
 
     // Then contents of the file look like:
     // low 42
