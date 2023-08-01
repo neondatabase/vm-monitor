@@ -1,12 +1,12 @@
-use std::time::Duration;
+// REVIEW: is there a reason why src/main.rs is separate from src/lib.rs?
+// IMO it seems like unnecessary complication.
+use std::{sync::OnceLock, time::Duration};
 
 use anyhow::Context;
 use axum::{
-    body::Full,
     extract::{ws::WebSocket, State, WebSocketUpgrade},
-    http::StatusCode,
-    response::{IntoResponse, Response},
-    routing::{any, get},
+    response::Response,
+    routing::get,
     Router, Server,
 };
 use clap::Parser;
@@ -15,6 +15,8 @@ use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 use vm_monitor::monitor::Monitor;
 use vm_monitor::Args;
+
+static ARGS: OnceLock<Args> = OnceLock::new();
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -27,18 +29,13 @@ async fn main() -> anyhow::Result<()> {
         .finish();
     tracing::subscriber::set_global_default(subscriber)?;
 
+    ARGS.get_or_init(Args::parse);
+
     // This channel is used to close old connections. When a new connection is
     // made, we send a message signalling to the old connection to close.
     let (sender, _) = tokio::sync::broadcast::channel::<()>(1);
 
     let app = Router::new()
-        // Current, the informant exposes a /register endpoint. At the time of
-        // writing, we need to support both agent->informant->monitor and
-        // agent->monitor systems due to old vms. For new deploys with just the
-        // monitor, the agent can still hit the /register endpoint. If it gets
-        // a 404 back, it'll know to git the /monitor endpoint and normal
-        // functioning can follow.
-        .route("/register", any(register))
         // This route gets upgraded to a websocket connection. We only support
         // connection at a time. We enforce this using global app state.
         // True indicates we are connected to someone and False indicates we can
@@ -48,16 +45,12 @@ async fn main() -> anyhow::Result<()> {
 
     let args = Args::parse();
     let addr = args.addr();
-    let server = Server::try_bind(
-        &addr
-            .parse()
-            .with_context(|| format!("failed to parse address: '{addr}'"))?,
-    )
-    .with_context(|| format!("failed to bind to {addr}"))?;
+    let bound = Server::try_bind(&addr.parse().expect("parsing address should not fail"))
+        .with_context(|| format!("failed to bind to {addr}"))?;
 
-    info!("server listening on {addr}");
+    info!(addr, "server bound");
 
-    server
+    bound
         .serve(app.into_make_service())
         .await
         .context("server exited")?;
@@ -65,24 +58,17 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Always returns a 404 to signal to agents that they should connect on the
-/// /monitor endpoint
-#[tracing::instrument(name = "/register")]
-async fn register() -> Response {
-    Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .body(Full::from("connect to the monitor via ws on /monitor"))
-        .unwrap()
-        .into_response()
-}
-
-/// Handles incoming websocket connections. If we are already to connected to
-/// an informant, we stop the monitor for that connection (thus killing it),
-/// and create a new monitor for the new connection.
+/// Handles incoming websocket connections.
+///
+/// If we are already to connected to an informant, we kill that old connection
+/// and accept the new one.
 #[tracing::instrument(name = "/monitor", skip(ws))]
 async fn ws_handler(ws: WebSocketUpgrade, State(sender): State<broadcast::Sender<()>>) -> Response {
     // Kill the old monitor
-    warn!("already connected to an informant over websocket; closing old connection");
+    // TODO: this comment is a little jank, as on the first connection to the server,
+    // we're not actually connected to anyone. We cn probaly drop the first receiver
+    // and then look at the receiver count to determine if this if the first connection.
+    warn!("already connected to an informant over websocket -> closing old connection");
     let _ = sender.send(());
 
     // Start the new one. Wow, the cycle of death and rebirth
@@ -94,11 +80,13 @@ async fn ws_handler(ws: WebSocketUpgrade, State(sender): State<broadcast::Sender
 // operation if we're switching agents
 /// Starts the monitor. If startup fails or the monitor exits, and error will
 /// be logged and our internal state will be reset to allow for new connections.
+#[tracing::instrument(skip_all)]
 async fn start_monitor(ws: WebSocket, kill: broadcast::Receiver<()>) {
-    let args = Args::parse();
+    info!("accepted new websocket connection -> starting monitor");
     let monitor = tokio::time::timeout(
         Duration::from_secs(2),
-        Monitor::new(Default::default(), args, ws, kill),
+        // Unwrap is safe because we initialize at the beginning of main
+        Monitor::new(Default::default(), ARGS.get().unwrap(), ws, kill),
     )
     .await;
     let mut monitor = match monitor {

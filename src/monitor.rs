@@ -9,33 +9,30 @@ use std::{fmt::Debug, mem};
 use anyhow::{bail, Context};
 use async_std::channel;
 use axum::extract::ws::{Message, WebSocket};
-use futures_util::{StreamExt, TryFutureExt};
+use futures_util::StreamExt;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
-use crate::{
-    cgroup::CgroupState,
-    dispatcher::Dispatcher,
-    filecache::{FileCacheConfig, FileCacheState},
-    get_total_system_memory,
-    manager::{Manager, MemoryLimits},
-    mib,
-    protocol::{
-        Allocation, InformantMessage, InformantMessageInner, MonitorMessage, MonitorMessageInner,
-    },
-    Args, MiB,
+use crate::cgroup::{CgroupWatcher, MemoryLimits, Sequenced};
+use crate::dispatcher::Dispatcher;
+use crate::filecache::{FileCacheConfig, FileCacheState};
+use crate::protocol::{
+    Allocation, InformantMessage, InformantMessageInner, MonitorMessage, MonitorMessageInner,
 };
+use crate::{get_total_system_memory, mib, Args, MiB};
 
+// REVIEW: This whole repo is called `vm-monitor`. Why is this something separate, in
+// a submodule? Is there a better name we could use?
 /// Central struct that interacts with informant, dispatcher, and cgroup to handle
 /// signals from the informant.
 #[derive(Debug)]
 pub struct Monitor {
     config: MonitorConfig,
     filecache: Option<FileCacheState>,
-    cgroup: Option<Arc<CgroupState>>,
+    cgroup: Option<Arc<CgroupWatcher>>,
     dispatcher: Dispatcher,
 
-    /// We "mint" new package ids by incrementing this counter and taking the value.
+    /// We "mint" new message ids by incrementing this counter and taking the value.
     counter: usize,
 
     /// A signal to kill the main thread produced by `self.run()`. This is triggered
@@ -74,10 +71,10 @@ impl Monitor {
     #[tracing::instrument(skip(ws))]
     pub async fn new(
         config: MonitorConfig,
-        args: Args,
+        args: &Args,
         ws: WebSocket,
         kill: broadcast::Receiver<()>,
-    ) -> anyhow::Result<Self> {
+    ) -> anyhow::Result<Monitor> {
         anyhow::ensure!(
             config.sys_buffer_bytes != 0,
             "invalid MonitorConfig: ssy_buffer_bytes cannot be 0"
@@ -108,14 +105,14 @@ impl Monitor {
         // We need to process file cache initialization before cgroup initialization, so that the memory
         // allocated to the file cache is appropriately taken into account when we decide the cgroup's
         // memory limits.
-        if let Some(connstr) = args.file_cache_conn_str {
+        if let Some(connstr) = &args.file_cache_conn_str {
             info!("initializing file cache");
             let config: FileCacheConfig = Default::default();
             if !config.in_memory {
                 panic!("file cache not in-memory implemented")
             }
 
-            let file_cache = FileCacheState::new(&connstr, config)
+            let mut file_cache = FileCacheState::new(connstr, config)
                 .await
                 .context("failed to create file cache")?;
 
@@ -145,28 +142,22 @@ impl Monitor {
             state.filecache = Some(file_cache);
         }
 
-        if let Some(name) = args.cgroup {
-            info!("creating manager");
-            let manager = Manager::new(name)
-                .await
-                .context("failed to create new manager")?;
-            let config = Default::default();
-
-            let mut cgroup_state =
-                CgroupState::new(manager, config, notified_recv, requesting_send);
+        if let Some(name) = &args.cgroup {
+            let mut cgroup = CgroupWatcher::new(name.clone(), notified_recv, requesting_send)
+                .context("failed to create cgroup manager")?;
 
             let available = mem - file_cache_reserved_bytes;
 
-            cgroup_state
+            cgroup
                 .set_memory_limits(available)
-                .await
                 .context("failed to set cgroup memory limits")?;
 
-            let cgroup_state = Arc::new(cgroup_state);
-            let clone = Arc::clone(&cgroup_state);
-            state.cgroup = Some(cgroup_state);
+            let cgroup = Arc::new(cgroup);
+            let clone = Arc::clone(&cgroup);
 
-            clone.handle_cgroup_signals_loop();
+            tokio::spawn(async move { clone.main_signals_loop().await });
+
+            state.cgroup = Some(cgroup);
         } else {
             // *NOTE*: We need to forget the sender so that its drop impl does not get ran.
             // This allows us to poll it in `Monitor::run` regardless of whether we
@@ -182,7 +173,7 @@ impl Monitor {
 
     /// Attempt to downscale filecache + cgroup
     #[tracing::instrument(skip(self))]
-    pub async fn try_downscale(&self, target: Allocation) -> anyhow::Result<(bool, String)> {
+    pub async fn try_downscale(&mut self, target: Allocation) -> anyhow::Result<(bool, String)> {
         // Nothing to adjust
         if self.cgroup.is_none() && self.filecache.is_none() {
             info!("no action needed for downscale (no cgroup or file cache enabled)");
@@ -202,20 +193,20 @@ impl Monitor {
         let mut new_cgroup_mem_high = 0;
         if let Some(cgroup) = &self.cgroup {
             new_cgroup_mem_high = cgroup
-                .config
+                .config()
                 .calculate_memory_high_value(usable_system_memory - expected_file_cache_mem_usage);
 
             let current = cgroup
-                .get_current_memory()
+                .current_memory_usage()
                 .context("failed to fetch cgroup memory")?;
 
-            if new_cgroup_mem_high < current + cgroup.config.memory_high_buffer_bytes {
+            if new_cgroup_mem_high < current + cgroup.config().memory_high_buffer_bytes {
                 let status = format!(
                     "{}: {} MiB (new high) < {} (current usage) + {} (buffer)",
                     "calculated memory.high too low",
                     mib(new_cgroup_mem_high),
                     mib(current),
-                    mib(cgroup.config.memory_high_buffer_bytes)
+                    mib(cgroup.config().memory_high_buffer_bytes)
                 );
 
                 info!(status, "discontinuing downscale");
@@ -227,7 +218,7 @@ impl Monitor {
         // The downscaling has been approved. Downscale the file cache, then the cgroup.
         let mut status = vec![];
         let mut file_cache_mem_usage = 0;
-        if let Some(file_cache) = &self.filecache {
+        if let Some(file_cache) = &mut self.filecache {
             if !file_cache.config.in_memory {
                 panic!("file cache not in-memory unimplemented")
             }
@@ -246,7 +237,9 @@ impl Monitor {
             let available_memory = usable_system_memory - file_cache_mem_usage;
 
             if file_cache_mem_usage != expected_file_cache_mem_usage {
-                new_cgroup_mem_high = cgroup.config.calculate_memory_high_value(available_memory);
+                new_cgroup_mem_high = cgroup
+                    .config()
+                    .calculate_memory_high_value(available_memory);
             }
 
             let limits = MemoryLimits::new(
@@ -256,7 +249,6 @@ impl Monitor {
                 available_memory,
             );
             cgroup
-                .manager
                 .set_limits(&limits)
                 .context("failed to set cgroup memory limits")?;
 
@@ -276,7 +268,7 @@ impl Monitor {
 
     /// Handle new resources
     #[tracing::instrument(skip(self))]
-    pub async fn handle_upscale(&self, resources: Allocation) -> anyhow::Result<()> {
+    pub async fn handle_upscale(&mut self, resources: Allocation) -> anyhow::Result<()> {
         if self.filecache.is_none() && self.cgroup.is_none() {
             info!("no action needed for upscale (no cgroup or file cache enabled)");
             return Ok(());
@@ -287,7 +279,7 @@ impl Monitor {
 
         // Get the file cache's expected contribution to the memory usage
         let mut file_cache_mem_usage = 0;
-        if let Some(file_cache) = &self.filecache {
+        if let Some(file_cache) = &mut self.filecache {
             if !file_cache.config.in_memory {
                 panic!("file cache not in-memory unimplemented");
             }
@@ -316,16 +308,17 @@ impl Monitor {
 
         if let Some(cgroup) = &self.cgroup {
             let available_memory = usable_system_memory - file_cache_mem_usage;
-            let new_cgroup_mem_high = cgroup.config.calculate_memory_high_value(available_memory);
+            let new_cgroup_mem_high = cgroup
+                .config()
+                .calculate_memory_high_value(available_memory);
             info!(
                 target = mib(new_cgroup_mem_high),
                 total = mib(new_mem),
-                name = cgroup.manager.name,
+                name = cgroup.name(),
                 "updating cgroup memory.high",
             );
             let limits = MemoryLimits::new(new_cgroup_mem_high, available_memory);
             cgroup
-                .manager
                 .set_limits(&limits)
                 .context("failed to set file cache size")?;
         }
@@ -338,26 +331,21 @@ impl Monitor {
     #[tracing::instrument(skip(self))]
     pub async fn process_packet(
         &mut self,
-        message: InformantMessage,
+        InformantMessage { inner, id }: InformantMessage,
     ) -> anyhow::Result<Option<MonitorMessage>> {
-        info!(?message, "received message from informant");
-        let InformantMessage { inner, id } = message;
         match inner {
             InformantMessageInner::UpscaleNotification { granted } => {
-                // See the TryFutureExt
-                // trait wonderfully located
-                // in the futures crate
                 self.handle_upscale(granted)
-                    .map_err(|e| e.context("failed to handle upscale"))
-                    .and_then(|_| self.dispatcher.notify_upscale(granted))
-                    .map_err(|e| e.context("failed to notify cgroup of upscale event"))
                     .await
-                    .map(|_| {
-                        Some(MonitorMessage::new(
-                            MonitorMessageInner::UpscaleConfirmation {},
-                            id,
-                        ))
-                    })
+                    .context("failed to handle upscale")?;
+                self.dispatcher
+                    .notify_upscale(Sequenced::new(granted))
+                    .await
+                    .context("failed to notify notify cgroup of upscale")?;
+                Ok(Some(MonitorMessage::new(
+                    MonitorMessageInner::UpscaleConfirmation {},
+                    id,
+                )))
             }
             InformantMessageInner::DownscaleRequest { target } => self
                 .try_downscale(target)
@@ -402,16 +390,13 @@ impl Monitor {
                 // we need to propagate an upscale request
                 sender = self.dispatcher.request_upscale_events.recv() => {
                     match sender {
-                        Ok(sender) => {
+                        Ok(()) => {
                             info!("cgroup asking for upscale; forwarding request");
                             self.counter += 1;
                             self.dispatcher
                                 .send(MonitorMessage::new(MonitorMessageInner::UpscaleRequest {}, self.counter))
                                 .await
                                 .context("failed to send packet")?;
-                            if sender.send(()).is_err() {
-                                warn!("error sending confirmation of upscale request to cgroup");
-                            };
                         },
                         Err(e) => warn!("error receiving upscale event: {e}")
                     }

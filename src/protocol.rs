@@ -1,5 +1,4 @@
-//! Module for types that interface with the informant - types representing
-//! protocols and types for actual messages sent to the informant.
+//! Types representing protocols and actual informant-monitor messages.
 //!
 //! The pervasive use of serde modifiers throughout this module is to ease
 //! serialization on the go side. Because go does not have enums (which model
@@ -36,7 +35,7 @@
 use core::fmt;
 use std::cmp;
 
-use serde::{Deserialize, Serialize};
+use serde::{de::Error, Deserialize, Serialize};
 use serde_repr::{Deserialize_repr, Serialize_repr};
 
 /// A Message we send to the informant.
@@ -56,6 +55,15 @@ impl MonitorMessage {
 /// The different underlying message types we can send to the informant.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
+// REVIEW: `MonitorMessageInner` is quite long. I would recommend renaming
+// `MonitorMessage`/`MonitorMessageInner` to one of:
+//
+//  * `MonitorMessage` / `MonitorMessageKind`
+//  * `OutboundMessage` / `OutboundMessageKind`
+//
+// (the reason to use "outbound" instead of "monitor" is because it makes the
+// direction of the flow clear.)
+// You might also like to use 'Msg' instead of 'Message', as an abbreviation :)
 pub enum MonitorMessageInner {
     /// Indicates that the informant sent an invalid message, i.e, we couldn't
     /// properly deserialize it.
@@ -76,6 +84,12 @@ pub enum MonitorMessageInner {
     /// However, if we are simply unsuccessful (for example, do to needing the resources),
     /// that gets included in the `DownscaleResult`.
     DownscaleResult {
+        // REVIEW: I don't think it's as simple as you've highlighted here because
+        // the monitor will still be *sending* this type. It's worth having the
+        // context here though. I'd specifically name the type used on the
+        // agent/informant side. If there's a relevant issue, feel free to link it -
+        // that's more likely to stay up to date with future plans.
+        // ---
         // FIXME for the future (once the informant is deprecated)
         // As of the time of writing, the informant also uses a struct on the go
         // side called DownscaleResult. This struct has uppercase fields which are
@@ -90,7 +104,7 @@ pub enum MonitorMessageInner {
     /// Part of the bidirectional heartbeat. The heartbeat is initiated by the
     /// informant.
     /// *Note*: this is a struct variant because of the way go serializes struct{}
-    HealthCheck {}
+    HealthCheck {},
 }
 
 /// A message received form the informant.
@@ -104,6 +118,9 @@ pub struct InformantMessage {
 /// The different underlying message types we can receive from the informant.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type", content = "content")]
+// REVIEW: Same thing here about the length of the type name - do you really want to
+// type that everywhere?
+// This is another case where e.g. `InboundMessageKind` might be nice :)
 pub enum InformantMessageInner {
     /// Indicates that the we sent an invalid message, i.e, we couldn't
     /// properly deserialize it.
@@ -122,11 +139,12 @@ pub enum InformantMessageInner {
     /// Part of the bidirectional heartbeat. The heartbeat is initiated by the
     /// informant.
     /// *Note*: this is a struct variant because of the way go serializes struct{}
-    HealthCheck {}
+    HealthCheck {},
 }
 
 /// Represents the resources granted to a VM.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+// REVIEW: it's ok to have >1 word! this type is resources! include it in the name!
 pub struct Allocation {
     /// Number of vCPUs
     pub(crate) cpu: f64,
@@ -143,6 +161,9 @@ impl Allocation {
 pub const PROTOCOL_MIN_VERSION: ProtocolVersion = ProtocolVersion::V1_0;
 pub const PROTOCOL_MAX_VERSION: ProtocolVersion = ProtocolVersion::V1_0;
 
+// REVIEW: AFAICT this will prevent adding new protocol versions because they'd need
+// to be recognized here, right? Consider defining ProtocolVersion as a newtype'd
+// `u8` with constants for V1_0, etc. The `match` in the Display impl will still work :)
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Serialize_repr, Deserialize_repr)]
 #[repr(u8)]
 pub enum ProtocolVersion {
@@ -160,12 +181,35 @@ impl fmt::Display for ProtocolVersion {
     }
 }
 
-/// A set of protocol bounds that determines what we are speaking. An invariant
-/// that must be maintained is that min <= max. These bounds are inclusive.
-#[derive(Deserialize, Debug)]
+/// A set of protocol bounds that determines what we are speaking.
+///
+/// These bounds are inclusive.
+#[derive(Debug)]
 pub struct ProtocolRange {
-    min: ProtocolVersion,
-    max: ProtocolVersion,
+    pub min: ProtocolVersion,
+    pub max: ProtocolVersion,
+}
+
+// Use a custom deserialize impl to ensure that `self.min <= self.max`
+impl<'de> Deserialize<'de> for ProtocolRange {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct InnerProtocolRange {
+            min: ProtocolVersion,
+            max: ProtocolVersion,
+        }
+        let InnerProtocolRange { min, max } = InnerProtocolRange::deserialize(deserializer)?;
+        if min > max {
+            Err(D::Error::custom(format!(
+                "min version = {min} is greater than max version = {max}",
+            )))
+        } else {
+            Ok(ProtocolRange { min, max })
+        }
+    }
 }
 
 impl fmt::Display for ProtocolRange {
@@ -179,16 +223,8 @@ impl fmt::Display for ProtocolRange {
 }
 
 impl ProtocolRange {
-    /// Create a new `ProtocolBounds`. Returns None if min > max
-    pub fn new(min: ProtocolVersion, max: ProtocolVersion) -> Option<Self> {
-        if min > max {
-            None
-        } else {
-            Some(Self { min, max })
-        }
-    }
-
     /// Merge to `ProtocolBounds` to create a range that suitable for both of them.
+    // REVIEW: "create a range" - that's not what this function, does, is it?
     pub fn highest_shared_version(&self, other: &Self) -> anyhow::Result<ProtocolVersion> {
         // We first have to make sure the ranges are overlapping. Once we know
         // this, we can merge the ranges by taking the max of the mins and the
@@ -214,6 +250,17 @@ impl ProtocolRange {
 /// An enum in disguise for returning the settled on protocol with the informant.
 /// If error is None, version should be Some and vice versa. It's set up this way
 /// to ease usage on the go side.
+// REVIEW: Does it have to be defined like this? Could the following work?
+//
+//   #[derive(Serialize)]
+//   #[serde(rename_all = "camelCase")]
+//   pub enum ProtocolResponse {
+//       Error(String),
+//       Version(ProtocolVersion),
+//   }
+//
+// see also: https://serde.rs/enum-representations.html
+// NB: "externally tagged" is the default.
 #[derive(Serialize, Debug)]
 pub struct ProtocolResponse {
     error: Option<String>,
