@@ -232,11 +232,7 @@ impl ProtocolRange {
     }
 }
 
-/// An enum in disguise for returning the settled on protocol with the informant.
-/// If error is None, version should be Some and vice versa. It's set up this way
-/// to ease usage on the go side.
-// REVIEW: Does it have to be defined like this? Could the following work?
-//
+/// We send this to the monitor after negotiating which protocol to use
 #[derive(Serialize, Debug)]
 #[serde(rename_all = "camelCase")]
 pub enum ProtocolResponse {
