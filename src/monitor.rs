@@ -13,7 +13,7 @@ use futures_util::StreamExt;
 use tokio::sync::broadcast;
 use tracing::{debug, info, warn};
 
-use crate::channels::{CgroupWatcher, MemoryLimits, Sequenced};
+use crate::cgroup::{CgroupWatcher, MemoryLimits, Sequenced};
 use crate::dispatcher::Dispatcher;
 use crate::filecache::{FileCacheConfig, FileCacheState};
 use crate::protocol::{

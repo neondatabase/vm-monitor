@@ -117,7 +117,7 @@ where
 impl<T> PeekableStream<T> {
     pub fn new<S>(stream: S) -> Self
     where
-        S: Stream<Item = T> + Send + 'static
+        S: Stream<Item = T> + Send + 'static,
     {
         Self {
             stream: futures_util::StreamExt::boxed(stream),

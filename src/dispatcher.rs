@@ -15,7 +15,7 @@ use futures_util::{
 };
 use tracing::info;
 
-use crate::channels::Sequenced;
+use crate::cgroup::Sequenced;
 use crate::protocol::{
     Allocation, MonitorMessage, ProtocolRange, ProtocolResponse, ProtocolVersion,
     PROTOCOL_MAX_VERSION, PROTOCOL_MIN_VERSION,
@@ -130,8 +130,7 @@ impl Dispatcher {
     /// the acknowledgement.
     #[tracing::instrument(skip(self))]
     pub async fn notify_upscale(&self, resources: Sequenced<Allocation>) -> anyhow::Result<()> {
-        self
-            .notify_upscale_events
+        self.notify_upscale_events
             .send(resources)
             .await
             .context("failed to send resources and oneshot sender across channel")
