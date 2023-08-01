@@ -39,14 +39,14 @@ use serde::{de::Error, Deserialize, Serialize};
 
 /// A Message we send to the informant.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct MonitorMessage {
+pub struct OutboundMsg {
     #[serde(flatten)]
-    pub(crate) inner: MonitorMessageInner,
+    pub(crate) inner: OutboundMsgKind,
     pub(crate) id: usize,
 }
 
-impl MonitorMessage {
-    pub fn new(inner: MonitorMessageInner, id: usize) -> Self {
+impl OutboundMsg {
+    pub fn new(inner: OutboundMsgKind, id: usize) -> Self {
         Self { inner, id }
     }
 }
@@ -54,16 +54,7 @@ impl MonitorMessage {
 /// The different underlying message types we can send to the informant.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type")]
-// REVIEW: `MonitorMessageInner` is quite long. I would recommend renaming
-// `MonitorMessage`/`MonitorMessageInner` to one of:
-//
-//  * `MonitorMessage` / `MonitorMessageKind`
-//  * `OutboundMessage` / `OutboundMessageKind`
-//
-// (the reason to use "outbound" instead of "monitor" is because it makes the
-// direction of the flow clear.)
-// You might also like to use 'Msg' instead of 'Message', as an abbreviation :)
-pub enum MonitorMessageInner {
+pub enum OutboundMsgKind {
     /// Indicates that the informant sent an invalid message, i.e, we couldn't
     /// properly deserialize it.
     InvalidMessage { error: String },
@@ -83,18 +74,14 @@ pub enum MonitorMessageInner {
     /// However, if we are simply unsuccessful (for example, do to needing the resources),
     /// that gets included in the `DownscaleResult`.
     DownscaleResult {
-        // REVIEW: I don't think it's as simple as you've highlighted here because
-        // the monitor will still be *sending* this type. It's worth having the
-        // context here though. I'd specifically name the type used on the
-        // agent/informant side. If there's a relevant issue, feel free to link it -
-        // that's more likely to stay up to date with future plans.
-        // ---
         // FIXME for the future (once the informant is deprecated)
-        // As of the time of writing, the informant also uses a struct on the go
-        // side called DownscaleResult. This struct has uppercase fields which are
+        // As of the time of writing, the informant/agent version of this struct is
+        // called api.DownscaleResult. This struct has uppercase fields which are
         // serialized as such. Thus, we serialize using uppercase names so we don't
         // have to make a breaking change to the agent<->informant protocol. Once
-        // the informant has been superseded by the monitor, this can be changed back.
+        // the informant has been superseded by the monitor, we can add the correct
+        // struct tags to api.DownscaleResult without causing a breaking change,
+        // since we don't need to support the agent<->informant protocol anymore.
         #[serde(rename = "Ok")]
         ok: bool,
         #[serde(rename = "Status")]
@@ -108,19 +95,16 @@ pub enum MonitorMessageInner {
 
 /// A message received form the informant.
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct InformantMessage {
+pub struct InboundMsg {
     #[serde(flatten)]
-    pub(crate) inner: InformantMessageInner,
+    pub(crate) inner: InboundMsgKind,
     pub(crate) id: usize,
 }
 
 /// The different underlying message types we can receive from the informant.
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(tag = "type", content = "content")]
-// REVIEW: Same thing here about the length of the type name - do you really want to
-// type that everywhere?
-// This is another case where e.g. `InboundMessageKind` might be nice :)
-pub enum InformantMessageInner {
+pub enum InboundMsgKind {
     /// Indicates that the we sent an invalid message, i.e, we couldn't
     /// properly deserialize it.
     InvalidMessage { error: String },
@@ -131,10 +115,10 @@ pub enum InformantMessageInner {
     /// Indicates to us that we have been granted more resources. We should respond
     /// with an `UpscaleConfirmation` when done handling the resources (increasins
     /// file cache size, cgorup memory limits).
-    UpscaleNotification { granted: Allocation },
+    UpscaleNotification { granted: Resources },
     /// A request to reduce resource usage. We should response with a `DownscaleResult`,
     /// when done.
-    DownscaleRequest { target: Allocation },
+    DownscaleRequest { target: Resources },
     /// Part of the bidirectional heartbeat. The heartbeat is initiated by the
     /// informant.
     /// *Note*: this is a struct variant because of the way go serializes struct{}
@@ -143,15 +127,18 @@ pub enum InformantMessageInner {
 
 /// Represents the resources granted to a VM.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
-// REVIEW: it's ok to have >1 word! this type is resources! include it in the name!
-pub struct Allocation {
+// Renamed because the agent/informant has multiple resources types:
+// `Resources` (milliCPU/memory slots)
+// `Allocation` (vCPU/bytes) <- what we correspond to
+#[serde(rename(serialize = "Allocation", deserialize = "Allocation"))]
+pub struct Resources {
     /// Number of vCPUs
     pub(crate) cpu: f64,
     /// Bytes of memory
     pub(crate) mem: u64,
 }
 
-impl Allocation {
+impl Resources {
     pub fn new(cpu: f64, mem: u64) -> Self {
         Self { cpu, mem }
     }
@@ -222,8 +209,7 @@ impl fmt::Display for ProtocolRange {
 }
 
 impl ProtocolRange {
-    /// Merge to `ProtocolBounds` to create a range that suitable for both of them.
-    // REVIEW: "create a range" - that's not what this function, does, is it?
+    /// Find the highest shared version between two `ProtocolRange`'s
     pub fn highest_shared_version(&self, other: &Self) -> anyhow::Result<ProtocolVersion> {
         // We first have to make sure the ranges are overlapping. Once we know
         // this, we can merge the ranges by taking the max of the mins and the

@@ -24,7 +24,7 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tracing::{info, warn};
 
-use crate::protocol::Allocation;
+use crate::protocol::Resources;
 use crate::MiB;
 
 /// Monotonically increasing counter of the number of memory.high events
@@ -88,7 +88,7 @@ impl Display for MemoryEvent {
 #[derive(Debug, Clone)]
 enum EventKind {
     /// We were upscaling to the contained allocation
-    Upscale(Allocation),
+    Upscale(Resources),
 
     /// Number of memory.highs
     MemoryHigh(u64),
@@ -291,7 +291,7 @@ pub struct CgroupWatcher {
     /// All events from this channel are also piped into `self.events`. Thus,
     /// when awaiting upscales directly, first check if an upscale has already
     /// been peeked and is held in events, then directly await this channel.
-    upscale_receiver: Receiver<Sequenced<Allocation>>,
+    upscale_receiver: Receiver<Sequenced<Resources>>,
 }
 
 /// Read memory.events for the desired event type.
@@ -347,7 +347,7 @@ impl CgroupWatcher {
     pub fn new(
         name: String,
         // A channel on which upscale notifications will be sent
-        upscale_notifier: Receiver<Sequenced<Allocation>>,
+        upscale_notifier: Receiver<Sequenced<Resources>>,
         // A channel on which to send upscale requests
         upscale_requester: Sender<()>,
     ) -> anyhow::Result<Self> {

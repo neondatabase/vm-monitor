@@ -17,7 +17,7 @@ use crate::cgroup::{CgroupWatcher, MemoryLimits, Sequenced};
 use crate::dispatcher::Dispatcher;
 use crate::filecache::{FileCacheConfig, FileCacheState};
 use crate::protocol::{
-    Allocation, InformantMessage, InformantMessageInner, MonitorMessage, MonitorMessageInner,
+    Resources, InboundMsg, InboundMsgKind, OutboundMsg, OutboundMsgKind,
 };
 use crate::{get_total_system_memory, mib, Args, MiB};
 
@@ -173,7 +173,7 @@ impl Monitor {
 
     /// Attempt to downscale filecache + cgroup
     #[tracing::instrument(skip(self))]
-    pub async fn try_downscale(&mut self, target: Allocation) -> anyhow::Result<(bool, String)> {
+    pub async fn try_downscale(&mut self, target: Resources) -> anyhow::Result<(bool, String)> {
         // Nothing to adjust
         if self.cgroup.is_none() && self.filecache.is_none() {
             info!("no action needed for downscale (no cgroup or file cache enabled)");
@@ -268,7 +268,7 @@ impl Monitor {
 
     /// Handle new resources
     #[tracing::instrument(skip(self))]
-    pub async fn handle_upscale(&mut self, resources: Allocation) -> anyhow::Result<()> {
+    pub async fn handle_upscale(&mut self, resources: Resources) -> anyhow::Result<()> {
         if self.filecache.is_none() && self.cgroup.is_none() {
             info!("no action needed for upscale (no cgroup or file cache enabled)");
             return Ok(());
@@ -331,10 +331,10 @@ impl Monitor {
     #[tracing::instrument(skip(self))]
     pub async fn process_packet(
         &mut self,
-        InformantMessage { inner, id }: InformantMessage,
-    ) -> anyhow::Result<Option<MonitorMessage>> {
+        InboundMsg { inner, id }: InboundMsg,
+    ) -> anyhow::Result<Option<OutboundMsg>> {
         match inner {
-            InformantMessageInner::UpscaleNotification { granted } => {
+            InboundMsgKind::UpscaleNotification { granted } => {
                 self.handle_upscale(granted)
                     .await
                     .context("failed to handle upscale")?;
@@ -342,34 +342,34 @@ impl Monitor {
                     .notify_upscale(Sequenced::new(granted))
                     .await
                     .context("failed to notify notify cgroup of upscale")?;
-                Ok(Some(MonitorMessage::new(
-                    MonitorMessageInner::UpscaleConfirmation {},
+                Ok(Some(OutboundMsg::new(
+                    OutboundMsgKind::UpscaleConfirmation {},
                     id,
                 )))
             }
-            InformantMessageInner::DownscaleRequest { target } => self
+            InboundMsgKind::DownscaleRequest { target } => self
                 .try_downscale(target)
                 .await
                 .context("failed to downscale")
                 .map(|(ok, status)| {
-                    Some(MonitorMessage::new(
-                        MonitorMessageInner::DownscaleResult { ok, status },
+                    Some(OutboundMsg::new(
+                        OutboundMsgKind::DownscaleResult { ok, status },
                         id,
                     ))
                 }),
-            InformantMessageInner::InvalidMessage { error } => {
+            InboundMsgKind::InvalidMessage { error } => {
                 warn!(
                     error,
                     id, "received notification of an invalid message we sent"
                 );
                 Ok(None)
             }
-            InformantMessageInner::InternalError { error } => {
+            InboundMsgKind::InternalError { error } => {
                 warn!(error, id, "informant experienced an internal error");
                 Ok(None)
             }
-            InformantMessageInner::HealthCheck {} => Ok(Some(MonitorMessage::new(
-                MonitorMessageInner::HealthCheck {},
+            InboundMsgKind::HealthCheck {} => Ok(Some(OutboundMsg::new(
+                OutboundMsgKind::HealthCheck {},
                 id,
             ))),
         }
@@ -394,7 +394,7 @@ impl Monitor {
                             info!("cgroup asking for upscale; forwarding request");
                             self.counter += 1;
                             self.dispatcher
-                                .send(MonitorMessage::new(MonitorMessageInner::UpscaleRequest {}, self.counter))
+                                .send(OutboundMsg::new(OutboundMsgKind::UpscaleRequest {}, self.counter))
                                 .await
                                 .context("failed to send packet")?;
                         },
@@ -408,7 +408,7 @@ impl Monitor {
                         // TODO: do we need to offload this work to another thread?
                         match msg {
                             Ok(msg) => {
-                                let packet: InformantMessage = match msg {
+                                let packet: InboundMsg = match msg {
                                     Message::Text(text) => {
                                         serde_json::from_str(&text).context("failed to deserialize text message")?
                                     }
@@ -426,8 +426,8 @@ impl Monitor {
                                     Ok(None) => continue,
                                     Err(e) => {
                                         warn!(error = &e.to_string(), "error handling packet");
-                                        MonitorMessage::new(
-                                            MonitorMessageInner::InternalError {
+                                        OutboundMsg::new(
+                                            OutboundMsgKind::InternalError {
                                                 error: e.to_string()
                                             },
                                             packet.id

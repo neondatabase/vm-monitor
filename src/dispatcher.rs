@@ -17,7 +17,7 @@ use tracing::info;
 
 use crate::cgroup::Sequenced;
 use crate::protocol::{
-    Allocation, MonitorMessage, ProtocolRange, ProtocolResponse, ProtocolVersion,
+    Resources, OutboundMsg, ProtocolRange, ProtocolResponse, ProtocolVersion,
     PROTOCOL_MAX_VERSION, PROTOCOL_MIN_VERSION,
 };
 
@@ -38,7 +38,7 @@ pub struct Dispatcher {
 
     /// Used to notify the cgroup when we are upscaled. The manager acknowledges
     /// on the `oneshot::Sender` once it is done handling the upscale.
-    pub(crate) notify_upscale_events: Sender<Sequenced<Allocation>>,
+    pub(crate) notify_upscale_events: Sender<Sequenced<Resources>>,
 
     /// When the cgroup requests upscale it will send on this channel. We send
     /// an `UpscaleRequst` to the informant and then signal on the provided
@@ -62,7 +62,7 @@ impl Dispatcher {
     ///    is no compatible version.
     pub async fn new(
         stream: WebSocket,
-        notify_upscale_events: Sender<Sequenced<Allocation>>,
+        notify_upscale_events: Sender<Sequenced<Resources>>,
         request_upscale_events: Receiver<()>,
     ) -> anyhow::Result<Self> {
         let (mut sink, mut source) = stream.split();
@@ -129,7 +129,7 @@ impl Dispatcher {
     /// Notify the cgroup manager that we have received upscale and wait for
     /// the acknowledgement.
     #[tracing::instrument(skip(self))]
-    pub async fn notify_upscale(&self, resources: Sequenced<Allocation>) -> anyhow::Result<()> {
+    pub async fn notify_upscale(&self, resources: Sequenced<Resources>) -> anyhow::Result<()> {
         self.notify_upscale_events
             .send(resources)
             .await
@@ -144,7 +144,7 @@ impl Dispatcher {
     /// serialize the wrong thing and send it, since `self.sink.send` will take
     /// any string.
     #[tracing::instrument(skip(self))]
-    pub async fn send(&mut self, message: MonitorMessage) -> anyhow::Result<()> {
+    pub async fn send(&mut self, message: OutboundMsg) -> anyhow::Result<()> {
         let json = serde_json::to_string(&message).context("failed to serialize packet")?;
         self.sink
             .send(Message::Text(json))
