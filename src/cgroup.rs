@@ -258,7 +258,7 @@ impl<T> Sequenced<T> {
 /// cgroup happy.
 #[derive(Debug)]
 pub struct CgroupWatcher {
-    config: Config,
+    pub config: Config,
 
     /// The event stream that informs cgroup actions. Consists of upscale requests
     /// and `memory.high` events.
@@ -641,11 +641,6 @@ impl CgroupWatcher {
 
         self.last_upscale_seqnum.store(seqnum, Ordering::Release);
         Ok(())
-    }
-
-    /// Get the `CgroupWatcher`'s config.
-    pub fn config(&self) -> &Config {
-        &self.config
     }
 
     /// Get the cgroup's name.

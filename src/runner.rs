@@ -12,7 +12,7 @@ use async_std::channel;
 use axum::extract::ws::{Message, WebSocket};
 use futures_util::StreamExt;
 use tokio::sync::broadcast;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use crate::cgroup::{CgroupWatcher, MemoryLimits, Sequenced};
 use crate::dispatcher::Dispatcher;
@@ -192,20 +192,20 @@ impl Runner {
         let mut new_cgroup_mem_high = 0;
         if let Some(cgroup) = &self.cgroup {
             new_cgroup_mem_high = cgroup
-                .config()
+                .config
                 .calculate_memory_high_value(usable_system_memory - expected_file_cache_mem_usage);
 
             let current = cgroup
                 .current_memory_usage()
                 .context("failed to fetch cgroup memory")?;
 
-            if new_cgroup_mem_high < current + cgroup.config().memory_high_buffer_bytes {
+            if new_cgroup_mem_high < current + cgroup.config.memory_high_buffer_bytes {
                 let status = format!(
                     "{}: {} MiB (new high) < {} (current usage) + {} (buffer)",
                     "calculated memory.high too low",
                     bytes_to_mebibytes(new_cgroup_mem_high),
                     bytes_to_mebibytes(current),
-                    bytes_to_mebibytes(cgroup.config().memory_high_buffer_bytes)
+                    bytes_to_mebibytes(cgroup.config.memory_high_buffer_bytes)
                 );
 
                 info!(status, "discontinuing downscale");
@@ -240,7 +240,7 @@ impl Runner {
 
             if file_cache_mem_usage != expected_file_cache_mem_usage {
                 new_cgroup_mem_high = cgroup
-                    .config()
+                    .config
                     .calculate_memory_high_value(available_memory);
             }
 
@@ -311,7 +311,7 @@ impl Runner {
         if let Some(cgroup) = &self.cgroup {
             let available_memory = usable_system_memory - file_cache_mem_usage;
             let new_cgroup_mem_high = cgroup
-                .config()
+                .config
                 .calculate_memory_high_value(available_memory);
             info!(
                 target = bytes_to_mebibytes(new_cgroup_mem_high),
