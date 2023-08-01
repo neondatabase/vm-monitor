@@ -40,16 +40,13 @@ impl Args {
     }
 }
 
+/// The number of bytes in one mebibyte.
 #[allow(non_upper_case_globals)]
 const MiB: u64 = 1 << 20;
 
-// REVIEW: `mib` does not make it clear what the function does. Consider a name that
-// describes the "function" of the function?
-// Or, perhaps use distinct types to represent "number of bytes" vs "number of
-// mebibytes", and then the conversion can be a method (e.g. `to_mib`).
 /// Convert a quantity in bytes to a quantity in mebibytes, generally for display
 /// purposes. (Most calculations in this crate use bytes directly)
-pub fn mib(bytes: u64) -> f32 {
+pub fn bytes_to_mebibytes(bytes: u64) -> f32 {
     (bytes as f32) / (MiB as f32)
 }
 

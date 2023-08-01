@@ -17,7 +17,7 @@ use crate::cgroup::{CgroupWatcher, MemoryLimits, Sequenced};
 use crate::dispatcher::Dispatcher;
 use crate::filecache::{FileCacheConfig, FileCacheState};
 use crate::protocol::{InboundMsg, InboundMsgKind, OutboundMsg, OutboundMsgKind, Resources};
-use crate::{get_total_system_memory, mib, Args, MiB};
+use crate::{get_total_system_memory, bytes_to_mebibytes, Args, MiB};
 
 // REVIEW: This whole repo is called `vm-monitor`. Why is this something separate, in
 // a submodule? Is there a better name we could use?
@@ -121,8 +121,8 @@ impl Monitor {
 
             let new_size = file_cache.config.calculate_cache_size(mem);
             info!(
-                initial = mib(size),
-                new = mib(new_size),
+                initial = bytes_to_mebibytes(size),
+                new = bytes_to_mebibytes(new_size),
                 "setting initial file cache size",
             );
 
@@ -202,9 +202,9 @@ impl Monitor {
                 let status = format!(
                     "{}: {} MiB (new high) < {} (current usage) + {} (buffer)",
                     "calculated memory.high too low",
-                    mib(new_cgroup_mem_high),
-                    mib(current),
-                    mib(cgroup.config().memory_high_buffer_bytes)
+                    bytes_to_mebibytes(new_cgroup_mem_high),
+                    bytes_to_mebibytes(current),
+                    bytes_to_mebibytes(cgroup.config().memory_high_buffer_bytes)
                 );
 
                 info!(status, "discontinuing downscale");
@@ -226,7 +226,7 @@ impl Monitor {
                 .await
                 .context("failed to set file cache size")?;
             file_cache_mem_usage = actual_usage;
-            let message = format!("set file cache size to {} MiB", mib(actual_usage));
+            let message = format!("set file cache size to {} MiB", bytes_to_mebibytes(actual_usage));
             info!("downscale: {message}");
             status.push(message);
         }
@@ -252,8 +252,8 @@ impl Monitor {
 
             let message = format!(
                 "set cgroup memory.high to {} MiB, of new max {} MiB",
-                mib(new_cgroup_mem_high),
-                mib(available_memory)
+                bytes_to_mebibytes(new_cgroup_mem_high),
+                bytes_to_mebibytes(available_memory)
             );
             info!("downscale: message");
             status.push(message);
@@ -284,8 +284,8 @@ impl Monitor {
 
             let expected_usage = file_cache.config.calculate_cache_size(usable_system_memory);
             info!(
-                target = mib(expected_usage),
-                total = mib(new_mem),
+                target = bytes_to_mebibytes(expected_usage),
+                total = bytes_to_mebibytes(new_mem),
                 "updating file cache size",
             );
 
@@ -297,8 +297,8 @@ impl Monitor {
             if actual_usage != expected_usage {
                 warn!(
                     "file cache was set to a different size that we wanted: target = {} Mib, actual= {} Mib",
-                    mib(expected_usage),
-                    mib(actual_usage)
+                    bytes_to_mebibytes(expected_usage),
+                    bytes_to_mebibytes(actual_usage)
                 )
             }
             file_cache_mem_usage = actual_usage;
@@ -310,8 +310,8 @@ impl Monitor {
                 .config()
                 .calculate_memory_high_value(available_memory);
             info!(
-                target = mib(new_cgroup_mem_high),
-                total = mib(new_mem),
+                target = bytes_to_mebibytes(new_cgroup_mem_high),
+                total = bytes_to_mebibytes(new_mem),
                 name = cgroup.name(),
                 "updating cgroup memory.high",
             );
