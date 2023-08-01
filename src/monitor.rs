@@ -1,7 +1,8 @@
-//! # `monitor`
+//! Exposes the `Runner`, which handles messages received from informant and
+//! sends upscale requests.
 //!
-//! Where the action happens: starting monitor, handling messages received from
-//! informant and sending upscale requests
+//! This is the "Monitor" part of the monitor binary and is the main entrypoint for
+//! all functionality.
 
 use std::sync::Arc;
 use std::{fmt::Debug, mem};
@@ -19,12 +20,10 @@ use crate::filecache::{FileCacheConfig, FileCacheState};
 use crate::protocol::{InboundMsg, InboundMsgKind, OutboundMsg, OutboundMsgKind, Resources};
 use crate::{bytes_to_mebibytes, get_total_system_memory, Args, MiB};
 
-// REVIEW: This whole repo is called `vm-monitor`. Why is this something separate, in
-// a submodule? Is there a better name we could use?
 /// Central struct that interacts with informant, dispatcher, and cgroup to handle
 /// signals from the informant.
 #[derive(Debug)]
-pub struct Monitor {
+pub struct Runner {
     config: Config,
     filecache: Option<FileCacheState>,
     cgroup: Option<Arc<CgroupWatcher>>,
@@ -38,7 +37,7 @@ pub struct Monitor {
     kill: broadcast::Receiver<()>,
 }
 
-/// Configuration for a `Monitor`
+/// Configuration for a `Runner`
 #[derive(Debug)]
 pub struct Config {
     /// `sys_buffer_bytes` gives the estimated amount of memory, in bytes, that the kernel uses before
@@ -65,7 +64,7 @@ impl Default for Config {
     }
 }
 
-impl Monitor {
+impl Runner {
     /// Create a new monitor.
     #[tracing::instrument(skip(ws))]
     pub async fn new(
@@ -73,7 +72,7 @@ impl Monitor {
         args: &Args,
         ws: WebSocket,
         kill: broadcast::Receiver<()>,
-    ) -> anyhow::Result<Monitor> {
+    ) -> anyhow::Result<Runner> {
         anyhow::ensure!(
             config.sys_buffer_bytes != 0,
             "invalid MonitorConfig: ssy_buffer_bytes cannot be 0"
@@ -89,7 +88,7 @@ impl Monitor {
             .await
             .context("error creating new dispatcher")?;
 
-        let mut state = Monitor {
+        let mut state = Runner {
             config,
             filecache: None,
             cgroup: None,
