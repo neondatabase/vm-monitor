@@ -104,7 +104,7 @@ pub enum MonitorMessageInner {
     /// Part of the bidirectional heartbeat. The heartbeat is initiated by the
     /// informant.
     /// *Note*: this is a struct variant because of the way go serializes struct{}
-    HealthCheck {}
+    HealthCheck {},
 }
 
 /// A message received form the informant.
@@ -139,7 +139,7 @@ pub enum InformantMessageInner {
     /// Part of the bidirectional heartbeat. The heartbeat is initiated by the
     /// informant.
     /// *Note*: this is a struct variant because of the way go serializes struct{}
-    HealthCheck {}
+    HealthCheck {},
 }
 
 /// Represents the resources granted to a VM.

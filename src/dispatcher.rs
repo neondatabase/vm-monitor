@@ -13,9 +13,9 @@ use futures_util::{
     stream::{SplitSink, SplitStream},
     SinkExt, StreamExt,
 };
-use tokio::sync::oneshot;
 use tracing::info;
 
+use crate::channels::Sequenced;
 use crate::protocol::{
     Allocation, MonitorMessage, ProtocolRange, ProtocolResponse, ProtocolVersion,
     PROTOCOL_MAX_VERSION, PROTOCOL_MIN_VERSION,
@@ -38,13 +38,13 @@ pub struct Dispatcher {
 
     /// Used to notify the cgroup when we are upscaled. The manager acknowledges
     /// on the `oneshot::Sender` once it is done handling the upscale.
-    pub(crate) notify_upscale_events: Sender<(Allocation, oneshot::Sender<()>)>,
+    pub(crate) notify_upscale_events: Sender<Sequenced<Allocation>>,
 
     /// When the cgroup requests upscale it will send on this channel. We send
     /// an `UpscaleRequst` to the informant and then signal on the provided
     /// `oneshot::Sender` that we have acknowledged and processed the upscale
     /// request.
-    pub(crate) request_upscale_events: Receiver<oneshot::Sender<()>>,
+    pub(crate) request_upscale_events: Receiver<()>,
 
     /// The protocol version we have agreed to use with the informant. This is negotiated
     /// during the creation of the dispatcher, and should be the highest shared protocol
@@ -62,8 +62,8 @@ impl Dispatcher {
     ///    is no compatible version.
     pub async fn new(
         stream: WebSocket,
-        notify_upscale_events: Sender<(Allocation, oneshot::Sender<()>)>,
-        request_upscale_events: Receiver<oneshot::Sender<()>>,
+        notify_upscale_events: Sender<Sequenced<Allocation>>,
+        request_upscale_events: Receiver<()>,
     ) -> anyhow::Result<Self> {
         let (mut sink, mut source) = stream.split();
 
@@ -129,14 +129,12 @@ impl Dispatcher {
     /// Notify the cgroup manager that we have received upscale and wait for
     /// the acknowledgement.
     #[tracing::instrument(skip(self))]
-    pub async fn notify_upscale(&self, resources: Allocation) -> anyhow::Result<()> {
-        let (tx, rx) = oneshot::channel();
-        self.notify_upscale_events
-            .send((resources, tx))
+    pub async fn notify_upscale(&self, resources: Sequenced<Allocation>) -> anyhow::Result<()> {
+        self
+            .notify_upscale_events
+            .send(resources)
             .await
-            .context("failed to send resources and oneshot sender across channel")?;
-        rx.await
-            .context("failed to get receipt of upscale from cgroup")
+            .context("failed to send resources and oneshot sender across channel")
     }
 
     /// Send a message to the informant.

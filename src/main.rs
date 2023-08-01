@@ -85,6 +85,7 @@ async fn start_monitor(ws: WebSocket, kill: broadcast::Receiver<()>) {
     info!("accepted new websocket connection -> starting monitor");
     let monitor = tokio::time::timeout(
         Duration::from_secs(2),
+        // Unwrap is safe because we initialize at the beginning of main
         Monitor::new(Default::default(), ARGS.get().unwrap(), ws, kill),
     )
     .await;

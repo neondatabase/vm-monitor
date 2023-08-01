@@ -1,5 +1,5 @@
 //! Handling upscales and downscales via cgroup operations.
-//! 
+//!
 //! Also handles requesting upscale and processing cgroup memory.high events.
 
 use std::{future, sync::Arc, time::Duration};
