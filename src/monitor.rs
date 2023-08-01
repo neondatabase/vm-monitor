@@ -17,7 +17,7 @@ use crate::cgroup::{CgroupWatcher, MemoryLimits, Sequenced};
 use crate::dispatcher::Dispatcher;
 use crate::filecache::{FileCacheConfig, FileCacheState};
 use crate::protocol::{InboundMsg, InboundMsgKind, OutboundMsg, OutboundMsgKind, Resources};
-use crate::{get_total_system_memory, bytes_to_mebibytes, Args, MiB};
+use crate::{bytes_to_mebibytes, get_total_system_memory, Args, MiB};
 
 // REVIEW: This whole repo is called `vm-monitor`. Why is this something separate, in
 // a submodule? Is there a better name we could use?
@@ -25,7 +25,7 @@ use crate::{get_total_system_memory, bytes_to_mebibytes, Args, MiB};
 /// signals from the informant.
 #[derive(Debug)]
 pub struct Monitor {
-    config: MonitorConfig,
+    config: Config,
     filecache: Option<FileCacheState>,
     cgroup: Option<Arc<CgroupWatcher>>,
     dispatcher: Dispatcher,
@@ -38,8 +38,9 @@ pub struct Monitor {
     kill: broadcast::Receiver<()>,
 }
 
+/// Configuration for a `Monitor`
 #[derive(Debug)]
-pub struct MonitorConfig {
+pub struct Config {
     /// `sys_buffer_bytes` gives the estimated amount of memory, in bytes, that the kernel uses before
     /// handing out the rest to userspace. This value is the estimated difference between the
     /// *actual* physical memory and the amount reported by `grep MemTotal /proc/meminfo`.
@@ -56,7 +57,7 @@ pub struct MonitorConfig {
     sys_buffer_bytes: u64,
 }
 
-impl Default for MonitorConfig {
+impl Default for Config {
     fn default() -> Self {
         Self {
             sys_buffer_bytes: 100 * MiB,
@@ -68,7 +69,7 @@ impl Monitor {
     /// Create a new monitor.
     #[tracing::instrument(skip(ws))]
     pub async fn new(
-        config: MonitorConfig,
+        config: Config,
         args: &Args,
         ws: WebSocket,
         kill: broadcast::Receiver<()>,
@@ -226,7 +227,10 @@ impl Monitor {
                 .await
                 .context("failed to set file cache size")?;
             file_cache_mem_usage = actual_usage;
-            let message = format!("set file cache size to {} MiB", bytes_to_mebibytes(actual_usage));
+            let message = format!(
+                "set file cache size to {} MiB",
+                bytes_to_mebibytes(actual_usage)
+            );
             info!("downscale: {message}");
             status.push(message);
         }
