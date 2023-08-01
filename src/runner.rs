@@ -154,7 +154,7 @@ impl Runner {
             let cgroup = Arc::new(cgroup);
             let clone = Arc::clone(&cgroup);
 
-            tokio::spawn(async move { clone.main_signals_loop().await });
+            tokio::spawn(async move { clone.watch().await });
 
             state.cgroup = Some(cgroup);
         } else {
