@@ -1,7 +1,7 @@
 //! Managing the websocket connection and other signals in the monitor.
 //!
 //! Contains types that manage the interaction (not data interchange, see `protocol`)
-//! between informant and monitor, allowing us to to process and send packets in a
+//! between informant and monitor, allowing us to to process and send messages in a
 //! straightforward way. The dispatcher also manages that signals that come from
 //! the cgroup (requesting upscale), and the signals that go to the cgroup
 //! (notifying it of upscale).
@@ -145,7 +145,7 @@ impl Dispatcher {
     /// any string.
     #[tracing::instrument(skip(self))]
     pub async fn send(&mut self, message: OutboundMsg) -> anyhow::Result<()> {
-        let json = serde_json::to_string(&message).context("failed to serialize packet")?;
+        let json = serde_json::to_string(&message).context("failed to serialize message")?;
         self.sink
             .send(Message::Text(json))
             .await

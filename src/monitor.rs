@@ -1,6 +1,6 @@
 //! # `monitor`
 //!
-//! Where the action happens: starting monitor, handling packets received from
+//! Where the action happens: starting monitor, handling messages received from
 //! informant and sending upscale requests
 
 use std::sync::Arc;
@@ -328,10 +328,10 @@ impl Monitor {
         Ok(())
     }
 
-    /// Take in a packet and perform some action, such as downscaling or upscaling,
-    /// and return a packet to be send back.
+    /// Take in a message and perform some action, such as downscaling or upscaling,
+    /// and return a message to be send back.
     #[tracing::instrument(skip(self))]
-    pub async fn process_packet(
+    pub async fn process_message(
         &mut self,
         InboundMsg { inner, id }: InboundMsg,
     ) -> anyhow::Result<Option<OutboundMsg>> {
@@ -397,19 +397,19 @@ impl Monitor {
                             self.dispatcher
                                 .send(OutboundMsg::new(OutboundMsgKind::UpscaleRequest {}, self.counter))
                                 .await
-                                .context("failed to send packet")?;
+                                .context("failed to send message")?;
                         },
                         Err(e) => warn!("error receiving upscale event: {e}")
                     }
                 }
-                // there is a packet from the informant
+                // there is a message from the informant
                 msg = self.dispatcher.source.next() => {
                     if let Some(msg) = msg {
-                        debug!(packet = ?msg, "receiving packet");
+                        debug!(message = ?msg, "receiving message");
                         // TODO: do we need to offload this work to another thread?
                         match msg {
                             Ok(msg) => {
-                                let packet: InboundMsg = match msg {
+                                let message: InboundMsg = match msg {
                                     Message::Text(text) => {
                                         serde_json::from_str(&text).context("failed to deserialize text message")?
                                     }
@@ -422,16 +422,16 @@ impl Monitor {
                                     },
                                 };
 
-                                let out = match self.process_packet(packet.clone()).await {
+                                let out = match self.process_message(message.clone()).await {
                                     Ok(Some(out)) => out,
                                     Ok(None) => continue,
                                     Err(e) => {
-                                        warn!(error = &e.to_string(), "error handling packet");
+                                        warn!(error = &e.to_string(), "error handling message");
                                         OutboundMsg::new(
                                             OutboundMsgKind::InternalError {
                                                 error: e.to_string()
                                             },
-                                            packet.id
+                                            message.id
                                         )
                                     }
                                 };
@@ -439,7 +439,7 @@ impl Monitor {
                                 self.dispatcher
                                     .send(out)
                                     .await
-                                    .context("failed to send packet")?;
+                                    .context("failed to send message")?;
                             }
                             Err(e) => warn!("{e}"),
                         }
