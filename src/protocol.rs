@@ -36,7 +36,6 @@ use core::fmt;
 use std::cmp;
 
 use serde::{de::Error, Deserialize, Serialize};
-use serde_repr::{Deserialize_repr, Serialize_repr};
 
 /// A Message we send to the informant.
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -161,22 +160,22 @@ impl Allocation {
 pub const PROTOCOL_MIN_VERSION: ProtocolVersion = ProtocolVersion::V1_0;
 pub const PROTOCOL_MAX_VERSION: ProtocolVersion = ProtocolVersion::V1_0;
 
-// REVIEW: AFAICT this will prevent adding new protocol versions because they'd need
-// to be recognized here, right? Consider defining ProtocolVersion as a newtype'd
-// `u8` with constants for V1_0, etc. The `match` in the Display impl will still work :)
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Serialize_repr, Deserialize_repr)]
-#[repr(u8)]
-pub enum ProtocolVersion {
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Ord, Eq, Serialize, Deserialize)]
+pub struct ProtocolVersion(u8);
+
+impl ProtocolVersion {
     /// Represents v1.0 of the informant<-> monitor protocol - the initial version
     ///
     /// Currently the latest version.
-    V1_0 = 1,
+    const V1_0: ProtocolVersion = ProtocolVersion(1);
 }
 
 impl fmt::Display for ProtocolVersion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
+        match *self {
+            ProtocolVersion(0) => f.write_str("<invalid: zero>"),
             ProtocolVersion::V1_0 => f.write_str("v1.0"),
+            other => write!(f, "<unknown: {other}>"),
         }
     }
 }
