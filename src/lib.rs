@@ -39,9 +39,6 @@ pub fn get_total_system_memory() -> u64 {
 pub mod dispatcher;
 pub mod protocol;
 
-pub mod cgroup;
 pub mod filecache;
-pub mod manager;
 pub mod monitor;
-
 pub mod channels;
