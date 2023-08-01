@@ -143,8 +143,8 @@ impl Dispatcher {
     /// `MonitorMessage`. Without safeguards like this, it's easy to accidentally
     /// serialize the wrong thing and send it, since `self.sink.send` will take
     /// any string.
-    #[tracing::instrument(skip(self))]
     pub async fn send(&mut self, message: OutboundMsg) -> anyhow::Result<()> {
+        info!(?message, "sending message");
         let json = serde_json::to_string(&message).context("failed to serialize message")?;
         self.sink
             .send(Message::Text(json))

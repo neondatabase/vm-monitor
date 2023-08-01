@@ -405,7 +405,7 @@ impl Runner {
                 // there is a message from the informant
                 msg = self.dispatcher.source.next() => {
                     if let Some(msg) = msg {
-                        debug!(message = ?msg, "receiving message");
+                        info!(message = ?msg, "received message");
                         // TODO: do we need to offload this work to another thread?
                         match msg {
                             Ok(msg) => {
@@ -415,7 +415,7 @@ impl Runner {
                                     }
                                     other => {
                                         warn!(
-                                            message=?other,
+                                            message = ?other,
                                             "informant should only send text messages but received different type"
                                         );
                                         continue
