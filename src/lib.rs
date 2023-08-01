@@ -8,7 +8,7 @@ use sysinfo::{RefreshKind, System, SystemExt};
 use tokio::sync::broadcast;
 use tracing::{error, info};
 
-use crate::monitor::Runner;
+use crate::runner::Runner;
 
 // Code that interfaces with agent
 pub mod dispatcher;
@@ -16,7 +16,7 @@ pub mod protocol;
 
 pub mod cgroup;
 pub mod filecache;
-pub mod monitor;
+pub mod runner;
 
 /// The CLI arguments
 ///
