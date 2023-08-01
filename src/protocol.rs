@@ -237,33 +237,9 @@ impl ProtocolRange {
 /// to ease usage on the go side.
 // REVIEW: Does it have to be defined like this? Could the following work?
 //
-//   #[derive(Serialize)]
-//   #[serde(rename_all = "camelCase")]
-//   pub enum ProtocolResponse {
-//       Error(String),
-//       Version(ProtocolVersion),
-//   }
-//
-// see also: https://serde.rs/enum-representations.html
-// NB: "externally tagged" is the default.
 #[derive(Serialize, Debug)]
-pub struct ProtocolResponse {
-    error: Option<String>,
-    version: Option<ProtocolVersion>,
-}
-
-impl ProtocolResponse {
-    pub fn version(version: ProtocolVersion) -> Self {
-        Self {
-            error: None,
-            version: Some(version),
-        }
-    }
-
-    pub fn error(error: String) -> Self {
-        Self {
-            error: Some(error),
-            version: None,
-        }
-    }
+#[serde(rename_all = "camelCase")]
+pub enum ProtocolResponse {
+    Error(String),
+    Version(ProtocolVersion),
 }

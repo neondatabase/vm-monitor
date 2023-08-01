@@ -17,8 +17,8 @@ use tracing::info;
 
 use crate::cgroup::Sequenced;
 use crate::protocol::{
-    Resources, OutboundMsg, ProtocolRange, ProtocolResponse, ProtocolVersion,
-    PROTOCOL_MAX_VERSION, PROTOCOL_MIN_VERSION,
+    OutboundMsg, ProtocolRange, ProtocolResponse, ProtocolVersion, Resources, PROTOCOL_MAX_VERSION,
+    PROTOCOL_MIN_VERSION,
 };
 
 /// The central handler for all communications in the monitor.
@@ -95,7 +95,7 @@ impl Dispatcher {
         let highest_shared_version = match monitor_range.highest_shared_version(&informant_range) {
             Ok(version) => {
                 sink.send(Message::Text(
-                    serde_json::to_string(&ProtocolResponse::version(version)).unwrap(),
+                    serde_json::to_string(&ProtocolResponse::Version(version)).unwrap(),
                 ))
                 .await
                 .context("failed to notify informant of negotiated protocol version")?;
@@ -103,7 +103,7 @@ impl Dispatcher {
             }
             Err(e) => {
                 sink.send(Message::Text(
-                    serde_json::to_string(&ProtocolResponse::error(format!(
+                    serde_json::to_string(&ProtocolResponse::Error(format!(
                         "Received protocol version range {} which does not overlap with {}",
                         informant_range, monitor_range
                     )))

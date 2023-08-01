@@ -16,9 +16,7 @@ use tracing::{debug, info, warn};
 use crate::cgroup::{CgroupWatcher, MemoryLimits, Sequenced};
 use crate::dispatcher::Dispatcher;
 use crate::filecache::{FileCacheConfig, FileCacheState};
-use crate::protocol::{
-    Resources, InboundMsg, InboundMsgKind, OutboundMsg, OutboundMsgKind,
-};
+use crate::protocol::{InboundMsg, InboundMsgKind, OutboundMsg, OutboundMsgKind, Resources};
 use crate::{get_total_system_memory, mib, Args, MiB};
 
 // REVIEW: This whole repo is called `vm-monitor`. Why is this something separate, in
@@ -368,10 +366,9 @@ impl Monitor {
                 warn!(error, id, "informant experienced an internal error");
                 Ok(None)
             }
-            InboundMsgKind::HealthCheck {} => Ok(Some(OutboundMsg::new(
-                OutboundMsgKind::HealthCheck {},
-                id,
-            ))),
+            InboundMsgKind::HealthCheck {} => {
+                Ok(Some(OutboundMsg::new(OutboundMsgKind::HealthCheck {}, id)))
+            }
         }
     }
 
