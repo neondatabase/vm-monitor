@@ -125,6 +125,13 @@ impl<T> PeekableStream<T> {
         }
     }
 
+    /// Peek the stream, but don't await a new element if there isn't currently
+    /// one in that we've already peeked.
+    pub fn peek_eager(&mut self) -> Option<&T> {
+        self.peek.as_ref()
+    }
+
+    /// Peek the stream.
     pub async fn peek(&mut self) -> Option<&T> {
         if self.peek.is_none() {
             self.peek = self.stream.next().await;
@@ -453,7 +460,7 @@ impl CgroupWatcher {
                     if let Some(Sequenced {
                         seqnum: peeknum,
                         data: EventKind::Upscale(_),
-                    }) = self.events.lock().await.peek().await
+                    }) = self.events.lock().await.peek_eager()
                     {
                         if *peeknum > seqnum {
                             info!(
@@ -600,18 +607,21 @@ impl CgroupWatcher {
     /// for upscales in particular so we know if we can thaw the cgroup early.
     #[tracing::instrument(skip(self))]
     async fn await_upscale(&self) -> anyhow::Result<()> {
-        // First check if we've already peeked the upscale
-        if let Sequenced {
+        // First check if we've already peeked the upscale.
+        //
+        // Take the lock in a block so that it gets dropped immediately after.
+        // If we take the lock in the <expr> section of if let <pat> = <expr>,
+        // it'll be help for the whole block - deadlocking when we take the lock
+        // again and call next to clear out the peek.
+        let peek = {
+            let mut guard = self.events.lock().await;
+            guard.peek_eager().cloned()
+        };
+
+        if let Some(Sequenced {
             seqnum,
             data: EventKind::Upscale(_),
-        } = self
-            .events
-            .lock()
-            .await
-            .peek()
-            .await
-            .ok_or_else(|| anyhow!("failed to read from events stream"))?
-            .clone()
+        }) = peek
         {
             // Clear out the peek
             let _ = self.events.lock().await.next().await;
