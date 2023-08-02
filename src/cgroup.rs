@@ -17,10 +17,7 @@ use cgroups_rs::{
 };
 use futures_util::{stream::BoxStream, Future, FutureExt, Stream};
 use inotify::{EventStream, Inotify, WatchMask};
-use tokio::{
-    sync::Mutex,
-    time::{Duration, Instant},
-};
+use tokio::time::{Duration, Instant};
 use tokio_stream::StreamExt;
 use tracing::{info, warn};
 
@@ -260,17 +257,6 @@ impl<T> Sequenced<T> {
 pub struct CgroupWatcher {
     pub config: Config,
 
-    /// The event stream that informs cgroup actions. Consists of upscale requests
-    /// and `memory.high` events.
-    ///
-    /// Note: this is wrapped in a mutex because otherwise we need `&mut self` to
-    /// do anything useful. This is a problem because `main_signals_loop` never
-    /// (or should never) return, so it effectively takes ownership of the
-    /// `Cgroup`. However, the monitor still needs to be able to do things like
-    /// get/set memory. Therefore we wrap the stream in a Mutex. It's a little
-    /// ugly, but the Mutex is never contended so this shouldn't have any ill effects.
-    events: Mutex<PeekableStream<Sequenced<EventKind>>>,
-
     /// The sequence number of the last upscale.
     ///
     /// If we receive a memory.high event that has a _lower_ sequence number than
@@ -299,6 +285,13 @@ pub struct CgroupWatcher {
     /// when awaiting upscales directly, first check if an upscale has already
     /// been peeked and is held in events, then directly await this channel.
     upscale_receiver: Receiver<Sequenced<Resources>>,
+}
+
+/// Stream of events that [`CgroupWatcher::run`] takes as input
+pub struct CgroupWatcherEventStream {
+    // We're using a full type to wrap the stream so that we dno't need to make the inner types
+    // public.
+    stream: PeekableStream<Sequenced<EventKind>>,
 }
 
 /// Read memory.events for the desired event type.
@@ -353,7 +346,7 @@ impl CgroupWatcher {
         upscale_notifier: Receiver<Sequenced<Resources>>,
         // A channel on which to send upscale requests
         upscale_requester: Sender<()>,
-    ) -> anyhow::Result<Self> {
+    ) -> anyhow::Result<(Self, CgroupWatcherEventStream)> {
         // TODO: clarify exactly why we need v2
         // Make sure cgroups v2 (aka unified) are supported
         if !is_cgroup2_unified_mode() {
@@ -409,20 +402,24 @@ impl CgroupWatcher {
                 }
             }));
 
-        Ok(Self {
-            name,
-            cgroup,
-            upscale_requester,
-            events: Mutex::new(PeekableStream::new(all_events)),
-            upscale_receiver: upscale_notifier,
-            last_upscale_seqnum: AtomicU64::new(0),
-            config: Default::default(),
-        })
+        Ok((
+            Self {
+                name,
+                cgroup,
+                upscale_requester,
+                upscale_receiver: upscale_notifier,
+                last_upscale_seqnum: AtomicU64::new(0),
+                config: Default::default(),
+            },
+            CgroupWatcherEventStream {
+                stream: PeekableStream::new(all_events),
+            },
+        ))
     }
 
     /// The entrypoint for the `CgroupWatcher`.
-    #[tracing::instrument(skip(self))]
-    pub async fn watch(&self) -> anyhow::Result<()> {
+    #[tracing::instrument(skip(self, events))]
+    pub async fn watch(&self, mut events: CgroupWatcherEventStream) -> anyhow::Result<()> {
         // There are several actions might do when receiving a `memory.high`,
         // such as freezing the cgroup, or increasing its `memory.high`. We don't
         // want to do these things too often (because postgres needs to run, and
@@ -436,14 +433,7 @@ impl CgroupWatcher {
         // to a memory.high event and it does not arrive in time.
         let mut waiting_on_upscale = false;
 
-        while let Some(Sequenced { seqnum, data }) = {
-            // Get the next element in a block to avoid holding the lock for the
-            // entire loop body - this will cause deadlocks
-            let mut stream = self.events.lock().await;
-            let next = stream.next().await;
-            drop(stream);
-            next
-        } {
+        while let Some(Sequenced { seqnum, data }) = events.stream.next().await {
             match data {
                 EventKind::Upscale(_) => self.last_upscale_seqnum.store(seqnum, Ordering::Release),
                 EventKind::MemoryHigh(_) => {
@@ -462,7 +452,7 @@ impl CgroupWatcher {
                     if let Some(Sequenced {
                         seqnum: peeknum,
                         data: EventKind::Upscale(_),
-                    }) = self.events.lock().await.peek_eager()
+                    }) = events.stream.peek_eager()
                     {
                         if *peeknum > seqnum {
                             info!(
@@ -477,7 +467,7 @@ impl CgroupWatcher {
                     if wait_to_freeze.is_elapsed() {
                         info!("received memory.high event -> requesting upscale");
                         waiting_on_upscale = self
-                            .handle_memory_high_event()
+                            .handle_memory_high_event(&mut events)
                             .await
                             .context("failed to handle upscale")?;
                         wait_to_freeze
@@ -560,8 +550,11 @@ impl CgroupWatcher {
     /// 4. After the timer elapses or we receive upscale, thaw the cgroup.
     /// 5. Return whether or not we are still waiting for upscale. If we are,
     ///    we'll increase the cgroups memory.high to avoid getting oom killed
-    #[tracing::instrument(skip(self))]
-    pub async fn handle_memory_high_event(&self) -> anyhow::Result<bool> {
+    #[tracing::instrument(skip(self, events))]
+    pub async fn handle_memory_high_event(
+        &self,
+        events: &mut CgroupWatcherEventStream,
+    ) -> anyhow::Result<bool> {
         // Immediately freeze the cgroup before doing anything else.
         info!("received memory.high event -> freezing cgroup");
         self.freeze().context("failed to freeze cgroup")?;
@@ -590,7 +583,7 @@ impl CgroupWatcher {
             }
 
             // Upscaled :)
-            res = self.await_upscale() => {
+            res = self.await_upscale(events) => {
                 res.context("failed to await upscale")?;
                 info!(elapsed = ?start_time.elapsed(), "received upscale in time");
                 waiting_on_upscale = false;
@@ -608,18 +601,10 @@ impl CgroupWatcher {
     ///
     /// This is used in `handle_memory_high_event`, where we need to listen
     /// for upscales in particular so we know if we can thaw the cgroup early.
-    #[tracing::instrument(skip(self))]
-    async fn await_upscale(&self) -> anyhow::Result<()> {
+    #[tracing::instrument(skip(self, events))]
+    async fn await_upscale(&self, events: &mut CgroupWatcherEventStream) -> anyhow::Result<()> {
         // First check if we've already peeked the upscale.
-        //
-        // Take the lock in a block so that it gets dropped immediately after.
-        // If we take the lock in the <expr> section of if let <pat> = <expr>,
-        // it'll be help for the whole block - deadlocking when we take the lock
-        // again and call next to clear out the peek.
-        let peek = {
-            let mut guard = self.events.lock().await;
-            guard.peek_eager().cloned()
-        };
+        let peek = events.stream.peek_eager().cloned();
 
         if let Some(Sequenced {
             seqnum,
@@ -627,7 +612,7 @@ impl CgroupWatcher {
         }) = peek
         {
             // Clear out the peek
-            let _ = self.events.lock().await.next().await;
+            let _ = events.stream.next().await;
             self.last_upscale_seqnum.store(seqnum, Ordering::Release);
             return Ok(());
         }

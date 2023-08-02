@@ -142,8 +142,9 @@ impl Runner {
         }
 
         if let Some(name) = &args.cgroup {
-            let mut cgroup = CgroupWatcher::new(name.clone(), notified_recv, requesting_send)
-                .context("failed to create cgroup manager")?;
+            let (mut cgroup, cgroup_event_stream) =
+                CgroupWatcher::new(name.clone(), notified_recv, requesting_send)
+                    .context("failed to create cgroup manager")?;
 
             let available = mem - file_cache_reserved_bytes;
 
@@ -154,7 +155,7 @@ impl Runner {
             let cgroup = Arc::new(cgroup);
             let clone = Arc::clone(&cgroup);
 
-            tokio::spawn(async move { clone.watch().await });
+            tokio::spawn(async move { clone.watch(cgroup_event_stream).await });
 
             state.cgroup = Some(cgroup);
         } else {
