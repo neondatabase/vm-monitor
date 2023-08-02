@@ -76,6 +76,8 @@ impl Runner {
     ) -> anyhow::Result<Runner> {
         anyhow::ensure!(
             config.sys_buffer_bytes != 0,
+            // REVIEW: Should be "invalid Config"?
+            // REVIEW: typo: s/ssy/sys/
             "invalid MonitorConfig: ssy_buffer_bytes cannot be 0"
         );
         // TODO: make these bounded? Probably
@@ -153,6 +155,7 @@ impl Runner {
                 .context("failed to set cgroup memory limits")?;
 
             let cgroup = Arc::new(cgroup);
+            // REVEIW: "clone" as a variable name is ambiguous, maybe reference `cgroup`?
             let clone = Arc::clone(&cgroup);
 
             tokio::spawn(async move { clone.watch(cgroup_event_stream).await });

@@ -1,3 +1,5 @@
+// REVIEW: Same comment as before - what's the reasoning behind having lib.rs
+// separate from main.rs?
 use axum::{
     extract::{ws::WebSocket, State, WebSocketUpgrade},
     response::Response,
@@ -22,6 +24,8 @@ pub mod runner;
 ///
 /// This is in a static so we only have to parse it once and then the entire
 /// binary can see it.
+// TODO: TBH I'd just parse this in main, leak it (via `Box::leak`) and then pass
+// around the &'static Args -- Otherwise it's harder to reason about.
 pub static ARGS: OnceLock<Args> = OnceLock::new();
 
 #[derive(Parser, Debug, Clone)]
@@ -67,6 +71,8 @@ pub async fn ws_handler(
     // TODO: this log is a little jank, as on the first connection to the server,
     // we're not actually connected to anyone. We can probaly drop the first receiver
     // and then look at the receiver count to determine if this if the first connection.
+    // REVIEW: yeah this log should be changed. Can be something like
+    // "closing old connection if there is one".
     info!("already connected to an informant over websocket -> closing old connection");
     let _ = sender.send(());
 
