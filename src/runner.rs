@@ -239,9 +239,7 @@ impl Runner {
             let available_memory = usable_system_memory - file_cache_mem_usage;
 
             if file_cache_mem_usage != expected_file_cache_mem_usage {
-                new_cgroup_mem_high = cgroup
-                    .config
-                    .calculate_memory_high_value(available_memory);
+                new_cgroup_mem_high = cgroup.config.calculate_memory_high_value(available_memory);
             }
 
             let limits = MemoryLimits::new(
@@ -310,9 +308,7 @@ impl Runner {
 
         if let Some(cgroup) = &self.cgroup {
             let available_memory = usable_system_memory - file_cache_mem_usage;
-            let new_cgroup_mem_high = cgroup
-                .config
-                .calculate_memory_high_value(available_memory);
+            let new_cgroup_mem_high = cgroup.config.calculate_memory_high_value(available_memory);
             info!(
                 target = bytes_to_mebibytes(new_cgroup_mem_high),
                 total = bytes_to_mebibytes(new_mem),
