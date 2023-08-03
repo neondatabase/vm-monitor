@@ -142,8 +142,9 @@ impl Runner {
         }
 
         if let Some(name) = &args.cgroup {
-            let mut cgroup = CgroupWatcher::new(name.clone(), notified_recv, requesting_send)
-                .context("failed to create cgroup manager")?;
+            let (mut cgroup, cgroup_event_stream) =
+                CgroupWatcher::new(name.clone(), notified_recv, requesting_send)
+                    .context("failed to create cgroup manager")?;
 
             let available = mem - file_cache_reserved_bytes;
 
@@ -152,9 +153,11 @@ impl Runner {
                 .context("failed to set cgroup memory limits")?;
 
             let cgroup = Arc::new(cgroup);
-            let clone = Arc::clone(&cgroup);
 
-            tokio::spawn(async move { clone.watch().await });
+            // Some might call this . . . cgroup v2
+            let cgroup_clone = Arc::clone(&cgroup);
+
+            tokio::spawn(async move { cgroup_clone.watch(cgroup_event_stream).await });
 
             state.cgroup = Some(cgroup);
         } else {
@@ -239,9 +242,7 @@ impl Runner {
             let available_memory = usable_system_memory - file_cache_mem_usage;
 
             if file_cache_mem_usage != expected_file_cache_mem_usage {
-                new_cgroup_mem_high = cgroup
-                    .config
-                    .calculate_memory_high_value(available_memory);
+                new_cgroup_mem_high = cgroup.config.calculate_memory_high_value(available_memory);
             }
 
             let limits = MemoryLimits::new(
@@ -310,9 +311,7 @@ impl Runner {
 
         if let Some(cgroup) = &self.cgroup {
             let available_memory = usable_system_memory - file_cache_mem_usage;
-            let new_cgroup_mem_high = cgroup
-                .config
-                .calculate_memory_high_value(available_memory);
+            let new_cgroup_mem_high = cgroup.config.calculate_memory_high_value(available_memory);
             info!(
                 target = bytes_to_mebibytes(new_cgroup_mem_high),
                 total = bytes_to_mebibytes(new_mem),
