@@ -128,6 +128,14 @@ impl<T> PeekableStream<T> {
     /// Peek the stream, but don't await a new element if there isn't currently
     /// one in that we've already peeked.
     pub fn peek_eager(&mut self) -> Option<&T> {
+        // Eagerly check for next item if the peek isn't initalized
+        if self.peek.is_none() {
+            self.peek = self
+                .stream
+                .next()
+                .now_or_never()
+                .expect("failed to read from stream");
+        }
         self.peek.as_ref()
     }
 
