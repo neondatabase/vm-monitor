@@ -76,7 +76,7 @@ impl Runner {
     ) -> anyhow::Result<Runner> {
         anyhow::ensure!(
             config.sys_buffer_bytes != 0,
-            "invalid MonitorConfig: ssy_buffer_bytes cannot be 0"
+            "invalid monitor Config: sys_buffer_bytes cannot be 0"
         );
         // TODO: make these bounded? Probably
         //

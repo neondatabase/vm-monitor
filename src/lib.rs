@@ -59,12 +59,12 @@ pub fn get_total_system_memory() -> u64 {
 /// If we are already to connected to an informant, we kill that old connection
 /// and accept the new one.
 #[tracing::instrument(name = "/monitor", skip(ws))]
-pub async fn ws_handler(ws: WebSocketUpgrade, State(sender): State<broadcast::Sender<()>>) -> Response {
+pub async fn ws_handler(
+    ws: WebSocketUpgrade,
+    State(sender): State<broadcast::Sender<()>>,
+) -> Response {
     // Kill the old monitor
-    // TODO: this log is a little jank, as on the first connection to the server,
-    // we're not actually connected to anyone. We can probaly drop the first receiver
-    // and then look at the receiver count to determine if this if the first connection.
-    info!("already connected to an informant over websocket -> closing old connection");
+    info!("closing old connection if there is one");
     let _ = sender.send(());
 
     // Start the new one. Wow, the cycle of death and rebirth
