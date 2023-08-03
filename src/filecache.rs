@@ -89,9 +89,9 @@ impl FileCacheConfig {
         // As shown in `calculate_cache_size`, we have two lines resulting from `resource_multiplier` and
         // `spread_factor`, respectively. They are:
         //
-        //                 `total`             `min_remaining_after_cache`
-        //   size = ---—————————————————— - —————---———————————————————--
-        //           `spread_factor` + 1        `spread_factor` + 1
+        //                 `total`           `min_remaining_after_cache`
+        //   size = ————————————————————— - —————————————————————————————
+        //           `spread_factor` + 1         `spread_factor` + 1
         //
         // and
         //
@@ -103,7 +103,7 @@ impl FileCacheConfig {
         // These lines intersect at:
         //
         //               `min_remaining_after_cache`
-        //   —————————————————————————————————————————————
+        //   ———————————————————————————————————————————————————
         //    1 - `resource_multiplier` × (`spread_factor` + 1)
         //
         // We want to ensure that this value (a) exists, and (b) is >= `min_remaining_after_cache`. This is
