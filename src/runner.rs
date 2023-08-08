@@ -104,7 +104,7 @@ impl Runner {
         // We need to process file cache initialization before cgroup initialization, so that the memory
         // allocated to the file cache is appropriately taken into account when we decide the cgroup's
         // memory limits.
-        if let Some(connstr) = &args.file_cache_conn_str {
+        if let Some(connstr) = &args.pgconnstr {
             info!("initializing file cache");
             let config: FileCacheConfig = Default::default();
             if !config.in_memory {
