@@ -149,6 +149,8 @@ impl FileCacheState {
             .await
             .context("failed to connect to pg client")?;
 
+        info!(conn_str, "connected to file cache");
+
         // The connection object performs the actual communication with the database,
         // so spawn it off to run on its own. See tokio-postgres docs.
         tokio::spawn(async move {
