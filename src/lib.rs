@@ -125,9 +125,9 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<ServerState>) 
 #[tracing::instrument(skip_all)]
 async fn start_monitor(ws: WebSocket, args: &Args, kill: broadcast::Receiver<()>) {
     info!("accepted new websocket connection -> starting monitor");
+    let timeout = Duration::from_secs(4);
     let monitor = tokio::time::timeout(
-        Duration::from_secs(2),
-        // Unwrap is safe because we initialize at the beginning of main
+        timeout,
         Runner::new(Default::default(), args, ws, kill),
     )
     .await;
@@ -137,9 +137,9 @@ async fn start_monitor(ws: WebSocket, args: &Args, kill: broadcast::Receiver<()>
             error!(?error, "failed to create monitor");
             return;
         }
-        Err(elapsed) => {
+        Err(_) => {
             error!(
-                ?elapsed,
+                ?timeout,
                 "creating monitor timed out (probably waiting to receive protocol range)"
             );
             return;
