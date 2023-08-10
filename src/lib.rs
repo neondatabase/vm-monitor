@@ -125,7 +125,7 @@ pub async fn ws_handler(ws: WebSocketUpgrade, State(state): State<ServerState>) 
 #[tracing::instrument(skip_all)]
 async fn start_monitor(ws: WebSocket, args: &Args, kill: broadcast::Receiver<()>) {
     info!("accepted new websocket connection -> starting monitor");
-    let timeout = Duration::from_secs(4);
+    let timeout = Duration::from_secs(10);
     let monitor = tokio::time::timeout(
         timeout,
         Runner::new(Default::default(), args, ws, kill),
