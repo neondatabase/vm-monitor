@@ -30,6 +30,9 @@ pub struct Runner {
     dispatcher: Dispatcher,
 
     /// We "mint" new message ids by incrementing this counter and taking the value.
+    ///
+    /// **Note**: This counter is always odd, so that we avoid collisions between the IDs generated
+    /// by us vs the informant.
     counter: usize,
 
     /// A signal to kill the main thread produced by `self.run()`. This is triggered
@@ -94,7 +97,7 @@ impl Runner {
             filecache: None,
             cgroup: None,
             dispatcher,
-            counter: 0,
+            counter: 1, // NB: must be odd, see the comment about the field for more.
             kill,
         };
 
@@ -392,7 +395,8 @@ impl Runner {
                     match sender {
                         Ok(()) => {
                             info!("cgroup asking for upscale; forwarding request");
-                            self.counter += 1;
+                            self.counter += 2; // Increment, preserving parity (i.e. keep the
+                                               // counter odd). See the field comment for more.
                             self.dispatcher
                                 .send(OutboundMsg::new(OutboundMsgKind::UpscaleRequest {}, self.counter))
                                 .await
